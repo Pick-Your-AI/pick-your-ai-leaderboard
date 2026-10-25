@@ -3,8 +3,8 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 65 other IDs to existing
-meaningful source cases, with exact test names and their limits. Fifteen IDs
+checks for 25 metric IDs. The inventory separately maps 65 other IDs to existing
+meaningful source cases, with exact test names and their limits. Eight IDs
 remain explicitly deferred in the inventory. The accepted eleven-reference update,
 two pair mappings, two accepted-source mappings, bounded Project item-day mapping
 and native curation mapping below do not certify all 98 public definitions.
@@ -53,12 +53,18 @@ coverage remains incomplete in every result.
 | `review_wait`               | A proven two-hour pair yields one duration sample                                              | Unresolved PRs are censored, missing readiness is separate, no complete pair is unavailable, and individual ranking is rejected                              |
 | `issues_opened`             | The issue's reporter receives its creation unit                                                | Assignment, the closing actor and missing reporter identity do not substitute for the reporter                                                               |
 | `issue_closure_stewardship` | An explicit closing transition attributes one operational unit to the closer                   | A closed snapshot does not establish a closer; closing does not establish implementing work, accepted findings or confirmed bugs                             |
-
 | `labels_applied` | Actual synthetic collection and exact hydration retain the editor, label ID and original clock | Missing/unrelated targets, changed revision, wrong subject, current labels and unknown/Bot actors cannot supply user credit |
 | `assignments_coordinated` | The observed editor receives a raw assignment unit, separately from the assignee | Current assignments are not history; the separate explicit transition helper does not approve an interval or award completed curation |
 | `milestones_curated` | Membership events retain their own actor, milestone and clock; replay is stable | Current membership and milestone-definition changes are not membership events; a reversal remains raw activity, not qualified curation |
 | `public_moderation` | Public pin/unpin/lock/unlock facets share one actor/item/UTC-day group | Private moderation, organization blocks, missing source history, wrong interval/policy and ranking are rejected |
 | `first_reviews` | The complete default REST sequence identifies the earliest eligible nonself review and shared timestamp ties | Self/Bot/service-account/pending participation, unknown/conflicting identities, incomplete cohorts and invalid clocks cannot manufacture first credit |
+| `title_scope_edits` | One webhook edit whose prior title or body text differs from the current text gives its editor one observed triager unit, once across replay and once for a combined title and body edit | Missing, empty, equal, non-text or unrelated-field history, no event proof or clock, unknown or Bot editors in the user lens, private repositories, out-of-window edits and initial issue creation count nothing. The item author is never the editor. Whether the edit is meaningful or one item-day group is not decided |
+| `project_updates` | A proven published-update transition gives its publisher one triager unit, once across replay; two publications at different source times give two | No-op or incomplete transitions, missing event proof, unsupported subtypes, Project status, Project item-field and issue-field changes, unknown or Bot publishers in the user lens, private repositories and out-of-window publications do not count. The enriched envelope is synthetic; the optional Project status-update feature, substantive content and native collection are not established |
+| `duplicate_resolution` | An intentional, publicly verified, event-proven duplicate relation event is one unit for its triage actor; swapped endpoints and replay of that event stay one. A later removal or un-mark of the same pair is not handled as a reversal and yields a second raw unit | Automatic relations, unverified endpoints, other or malformed relation kinds, missing proof, unknown or Bot actors in the user lens, private repositories, out-of-window marks, a plain issue closure and a `related` link do not count. Preserved unique evidence on the duplicate is not verified, and reversal or un-mark handling remains out of scope (a reversal remains raw activity) |
+| `accepted_findings` | An independent receipt on the reporter's issue fact gives one qualified unit on the acceptance clock, once across replay, while the raw issue unit remains | Issue closure alone, rejected receipts, self or unauthorized reviewers, a different actor, missing target or evidence, unverified or ineligible receipts, the observed lens and out-of-window acceptance do not count. Finding substance, versioning and collaborators rest on the reviewer |
+| `issue_resolution` | The same receipt contract on the merged deliverable fact credits its author | A closed assigned issue and the closer as a substituted actor do not count, nor do the receipt failures above. The issue-to-deliverable closing link and solution quality are not verified by the gate |
+| `issue_clarifications` | The same receipt contract on a proven edit fact credits the editor, while the raw edit unit remains | A raw edit, unchanged text and the item author as a substituted actor do not count, nor do the receipt failures above. Whether the edit improved scope or reproduction is the reviewer's judgment |
+| `routing_handoffs` | The same receipt contract on an assignment fact credits the coordinator, while the raw assignment unit remains | A raw assignment notification and the assignee as a substituted actor do not count, nor do the receipt failures above. The handoff note and the receiving owner's acceptance are not verified |
 
 These are bounded source/engine behaviors. For example, the thread case tests a
 host-proven transition boundary, not complete reconstruction of actual thread
@@ -70,8 +76,8 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 65 existing-source mappings and
-15 explicit remaining dispositions. The references include specialized domain
+The inventory now has 25 direct-suite entries, 65 existing-source mappings and
+eight explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation,
 editorial consent, observed Project item days and native Project curation. Each
@@ -136,30 +142,45 @@ distinct authors, self/unlisted-reviewer rejection, duplicate audits and ambiguo
 targets have explicit assertions. These references do not establish real
 participant consent, live permission, public policy approval or public activation.
 
-An inclusion and an exclusion may be asserted by the same named test. The
-milestone reference uses the body that actually constructs milestone no-ops and
-repeated day units; a label-only midnight test is not substituted for it. The
-added/removed-line references use their actual classifier quantity and exclusion
-assertions, without borrowing the separate changed-line integration result.
-The active-period reference checks distinct UTC weeks and repeated events in one
-week. It does not borrow an out-of-window, other-role newcomer uncertainty case
-as evidence for unknown in-scope active-week exclusion. Its calendar denominator
-is context, not a certified fully covered participation share or month projection.
+Every existing-source mapping names a distinct positive test and a distinct
+exclusion test, and the inventory guard rejects an entry whose two names are equal.
+Nine mappings that earlier cited one test for both were separated. Seven gained a
+new exclusion test with exact-value assertions through the actual normalizer or
+engine: `commits_integrated`, `reverted_delivery`, `pr_lines_added`,
+`pr_lines_removed`, `labels_corrected`, `related_links` and `discussions_started`.
+The added/removed-line inclusion test remains the classifier quantity test; its
+exclusion test runs the normalizer and asserts the exact quantity for each
+ineligible file class and for unverified integrations, without borrowing the
+separate changed-line integration result. Two mappings were re-pointed to existing
+tests that already assert their exclusions: `milestone_definitions` now cites the
+test showing that applying a milestone to an issue and a missing definition emit no
+definition unit (the label-only midnight test is still not substituted), and
+`active_periods` now cites the activity-period aggregator tests for distinct UTC
+weeks and for unaccepted, suppressed and automated exclusion, rather than the
+participation view. Its calendar denominator is context, not a certified fully
+covered participation share. The distinct names show where each assertion lives;
+they do not widen what a synthetic case proves.
 
 The remaining dispositions retain five derivation/admission prerequisites and
-ten IDs needing additional semantic cases. The accepted eleven-reference review
+three IDs needing additional semantic cases (`accepted_suggestions`,
+`mentorship` and `onboarding`). The accepted eleven-reference review
 left 21 entries; the prior composition mapped two pairs plus direct changes and
 helpful feedback, leaving 17. The [Project field item-day cases](../packages/metrics/test/project-field-days.test.js)
 added one bounded mapping for explicitly enriched synthetic item transitions
-under `project-field-day/v1`, leaving the historical 18/64/16 inventory. The [grouping guide](project-field-day-grouping.md)
+under `project-field-day/v1`, leaving 16. The [grouping guide](project-field-day-grouping.md)
 preserves the limits: no native `projects_v2_item` collection, installed grants,
 complete history, live sender identity, manual-effort classification, independent
-correction authorization or public activation is established. `project_updates`
-remains deferred because scalar field transitions do not prove substantive
-published Project progress-update artifacts.
+correction authorization or public activation is established. A later bounded
+batch of issue and triage cases moved seven further IDs into the direct suite
+(`title_scope_edits`, `project_updates`, `duplicate_resolution`,
+`accepted_findings`, `issue_resolution`, `issue_clarifications` and
+`routing_handoffs`), leaving nine. `project_updates` is now covered by the
+published-update case above, but only for an enriched synthetic transition; the
+optional Project status-update feature, substantive progress content and native
+collection remain unproven.
 
 The [native curation cases](../packages/metrics/test/project-curation-source.test.js)
-add one further bounded mapping, producing 18/65/15. Real normalizer/engine
+add one further bounded mapping, producing 25/65/8. Real normalizer/engine
 assertions conserve native add/remove/re-add operations, reject missing proof
 or actor substitution, and preserve automation and unknowns. Companion native
 reader and on-disk pipeline cases cover the separately configured family,
@@ -170,10 +191,22 @@ and no live installation, complete history, manual-work classification,
 independent acceptance or public activation is established. Existing status
 and field semantics, definition-only maturity and all other mappings remain
 unchanged.
+
+The inventory's `remaining_gap.maximum_deferred_metrics`
+must equal the deferred count, and the guard also pins a reviewed literal ceiling
+(currently eight) that the fixture value may not exceed. The deferred set therefore
+cannot grow without editing that literal, and both values are lowered in the same
+reviewed change that closes a gap.
 The optional retained-line and commit-attributed
-lenses are not silently assigned to the adjacent physical-context PRs. A raw
-relationship cannot establish preserved duplicate evidence; a generic accepted
-author fact cannot prove an exact suggestion link or a consented mentorship.
+lenses are not silently assigned to the adjacent physical-context PRs. A generic
+accepted author fact cannot prove an exact suggestion link or a consented
+mentorship. The three IDs were reviewed again in the evidence-separation batch and
+stay deferred: `accepted_suggestions` counts on an `integrated_at` clock and an
+exact link that no admitted source or receipt supplies, and `mentorship` and
+`onboarding` need recorded consent and, for onboarding, a first-contribution
+milestone tied to a support relationship, while the generic receipt checks only
+reviewer independence and target identity. The duplicate case verifies an intentional, publicly verified
+relation, not preserved unique evidence on the duplicate.
 
 At the original source lane's ownership check, [#382](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/382)
 owned COV15 transfer lineage, alias conservation and privacy suppression;
