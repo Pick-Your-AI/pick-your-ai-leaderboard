@@ -115,7 +115,7 @@ async function publicProjection(page: Page) {
   });
 }
 async function suppress(page: Page) {
-  await page.getByLabel("Display choice", { exact: true }).selectOption("suppress");
+  await page.getByRole("combobox", { name: "Display choice", exact: true }).selectOption("suppress");
   await page.getByLabel("Apply this choice to my account", { exact: true }).check();
   const saved = page.waitForResponse(
     (response) =>
@@ -127,7 +127,7 @@ async function suppress(page: Page) {
   const receipt: { id: string; status: string; version: number } = await response.json();
   expect(receipt).toEqual({ id: expect.stringMatching(/^[a-f0-9-]{36}$/), status: "applied", version: 1 });
   await expect(page.getByRole("heading", { name: "Receipt " + receipt.id, exact: true })).toBeVisible();
-  await expect(page.getByLabel("Display choice", { exact: true })).toHaveValue("suppress");
+  await expect(page.getByRole("combobox", { name: "Display choice", exact: true })).toHaveValue("suppress");
   return receipt;
 }
 
@@ -135,7 +135,7 @@ test("synthetic Controls login persists a correction receipt across SQLite reope
   const { page, context } = await enterAccount(journey, "101");
   await saveProfile(page, "Synthetic owner profile");
   const detail = "Synthetic private correction detail for this local journey only.";
-  await page.getByLabel("Request kind", { exact: true }).selectOption("correction");
+  await page.getByRole("combobox", { name: "Request kind", exact: true }).selectOption("correction");
   await page.getByRole("textbox", { name: "Details", exact: true }).fill(detail);
   const submitted = page.waitForResponse(
     (response) => response.url() === journey.origin + "/controls/requests" && response.request().method() === "POST",
