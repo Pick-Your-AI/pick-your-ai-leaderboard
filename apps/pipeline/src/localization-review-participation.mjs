@@ -280,29 +280,49 @@ export function materializeLocalizationReviews(entries, policies, digest) {
   return output;
 }
 
+function validateCapture(capture, maximumBindings) {
+  if (
+    !closed(capture, ["schemaVersion", "bindings"]) ||
+    capture.schemaVersion !== localizationReviewNormalizationVersion ||
+    !Array.isArray(capture.bindings) ||
+    capture.bindings.length > maximumBindings ||
+    new Set(capture.bindings.map((entry) => entry?.factId)).size !== capture.bindings.length
+  )
+    fail();
+  for (const binding of capture.bindings) {
+    if (!closed(binding, ["factId", "merge", "review"]) || typeof binding.factId !== "string") fail();
+    for (const source of [binding.merge, binding.review]) {
+      if (!closed(source, ["factKey", "documentHash"]) || !hashValue(source.factKey) || !hashValue(source.documentHash))
+        fail();
+    }
+  }
+}
+
+/** Retain only the bounded private authorization shape. Source rows and their
+ * hashes are rechecked separately before any restored publication is read.
+ */
+export function captureLocalizationReviewAuthorization(authorization) {
+  const capture = authorization.localizationReviewEvidence;
+  if (capture === undefined) return {};
+  // Identity authorization admits at most 10,000 sources, with 32 locale units
+  // per source. The aggregate explanation also enforces its byte/fact budgets.
+  validateCapture(capture, 10_000 * 32);
+  return { localizationReviewEvidence: structuredClone(capture) };
+}
+
 /** Called only after the existing locked, bounded normalization read and hash
  * checks. Both original dependencies must still be available; no author record,
  * receipt actor, or newly hydrated review can repair a missing captured source.
  */
 export function assertLocalizationReviewCapture(capture, rows, policies, digest) {
-  if (
-    !closed(capture, ["schemaVersion", "bindings"]) ||
-    capture.schemaVersion !== localizationReviewNormalizationVersion ||
-    !Array.isArray(capture.bindings) ||
-    capture.bindings.length > rows.length * 32 ||
-    new Set(capture.bindings.map((entry) => entry?.factId)).size !== capture.bindings.length
-  )
-    fail();
+  validateCapture(capture, rows.length * 32);
   const selected = new Map();
   for (const binding of capture.bindings) {
-    if (!closed(binding, ["factId", "merge", "review"]) || typeof binding.factId !== "string") fail();
     for (const [role, family] of [
       ["merge", "pull_requests"],
       ["review", "reviews"],
     ]) {
       const source = binding[role];
-      if (!closed(source, ["factKey", "documentHash"]) || !hashValue(source.factKey) || !hashValue(source.documentHash))
-        fail();
       const matches = rows.filter(
         (row) => row.fact_key === source.factKey && row.document_hash === source.documentHash,
       );

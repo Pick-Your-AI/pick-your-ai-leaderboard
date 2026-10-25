@@ -239,6 +239,9 @@ test("native locale reviewer credit joins first review and merge before independ
   const capture = first.frozen.identityAuthorization.localizationReviewEvidence;
   assert.equal(capture.schemaVersion, nativeVersion);
   assert.equal(capture.bindings.length, 2);
+  const explanation = await h.runtime.aggregateExplanations.read(first.publication.snapshotId);
+  assert.deepEqual(explanation.document.authorization.localizationReviewEvidence, capture);
+  assert.notEqual(explanation.document.authorization.localizationReviewEvidence, capture);
   const rows = await sourceRows(h);
   for (const binding of capture.bindings) {
     const merge = rows.find((row) => row.fact_key === binding.merge.factKey);
@@ -287,9 +290,15 @@ test("native locale reviewer credit joins first review and merge before independ
   assert.equal(qualified[0].acceptedBy, "303");
   assert.equal(qualified[0].occurredAt, h.fixture.parent.merged_at);
   assert.equal(qualified[0].acceptedAt, new Date(decision.at).toISOString());
+  const original = facts.find((fact) => fact.id === proof.contribution.contributionId);
+  assert.equal(qualified[0].recognitionSourceFactId, original.id);
+  assert.equal(
+    qualified[0].id,
+    "gh:" + comparisonHash(["recognized", "localization", original.canonicalKey, original.actorId]),
+  );
   assert.equal(
     qualified[0].canonicalKey,
-    facts.find((fact) => fact.id === proof.contribution.contributionId).canonicalKey,
+    "gh:" + comparisonHash(["recognized-unit", "localization", original.canonicalKey, original.actorId]),
   );
   const positiveRows = accepted.read.selected.rows.filter((row) => row.result.value > 0);
   assert.deepEqual(
@@ -394,10 +403,7 @@ test("later duplicate reviews do not multiply locale units or replace the first 
   const next = await publish(h);
   const nextReviewers = localeFacts(next.frozen).filter((fact) => fact.role === "reviewer");
   const priorReviewers = localeFacts(original.frozen).filter((fact) => fact.role === "reviewer");
-  assert.deepEqual(
-    nextReviewers.map((fact) => fact.id).sort(),
-    priorReviewers.map((fact) => fact.id).sort(),
-  );
+  assert.deepEqual(nextReviewers.map((fact) => fact.id).sort(), priorReviewers.map((fact) => fact.id).sort());
   const rows = await sourceRows(h);
   for (const binding of next.frozen.identityAuthorization.localizationReviewEvidence.bindings) {
     const row = rows.find((entry) => entry.fact_key === binding.review.factKey);
@@ -468,19 +474,22 @@ test("both locale dependencies remain required after reopen and exact restoratio
     );
     assert.ok(await currentRead(h.runtime, accepted.publication.snapshotId), role);
     const changedSource = { ...original.source_document, sourceRevision: "synthetic-other-locale-source" };
-    await h.db.query("UPDATE leaderboard_ingestion.source_facts SET document=$1 WHERE fact_key=$2", [
-      JSON.stringify(changedSource),
-      original.fact_key,
-    ]);
     await assert.rejects(
-      currentRead(h.runtime, accepted.publication.snapshotId),
-      { message: "localization_review_source_unverified" },
+      h.db.query("UPDATE leaderboard_ingestion.source_facts SET document=$1 WHERE fact_key=$2", [
+        JSON.stringify(changedSource),
+        original.fact_key,
+      ]),
+      /immutable_source_fact/,
       role,
     );
-    await h.db.query("UPDATE leaderboard_ingestion.source_facts SET document=$1 WHERE fact_key=$2", [
-      JSON.stringify(original.source_document),
-      original.fact_key,
-    ]);
+    assert.deepEqual(
+      (
+        await h.db.query("SELECT document FROM leaderboard_ingestion.source_facts WHERE fact_key=$1", [
+          original.fact_key,
+        ])
+      ).rows[0].document,
+      original.source_document,
+    );
     assert.ok(await currentRead(h.runtime, accepted.publication.snapshotId), role);
   }
   assert.deepEqual(await sourceRows(h), rows);

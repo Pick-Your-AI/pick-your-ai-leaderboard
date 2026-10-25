@@ -648,6 +648,73 @@ test("required explanations preserve bounded exact-source alias bindings without
   }
 });
 
+test("private explanations retain closed locale-review authorization without sharing mutable input", () => {
+  const { capture, binding } = pureCapture();
+  assert.equal(
+    Object.hasOwn(buildAggregateExplanation(capture, binding).authorization, "localizationReviewEvidence"),
+    false,
+  );
+  const evidence = {
+    schemaVersion: components.github.localizationReviewNormalizationVersion,
+    bindings: [
+      {
+        factId: "gh:" + "a".repeat(64),
+        merge: { factKey: "b".repeat(64), documentHash: "c".repeat(64) },
+        review: { factKey: "d".repeat(64), documentHash: "e".repeat(64) },
+      },
+    ],
+  };
+  capture.authorization.localizationReviewEvidence = evidence;
+  const explained = buildAggregateExplanation(capture, binding).authorization.localizationReviewEvidence;
+  assert.deepEqual(explained, evidence);
+  assert.notEqual(explained, evidence);
+  assert.notEqual(explained.bindings[0].merge, evidence.bindings[0].merge);
+  explained.bindings[0].merge.factKey = "f".repeat(64);
+  assert.equal(evidence.bindings[0].merge.factKey, "b".repeat(64));
+  for (const mutate of [
+    (value) => {
+      value.privateNote = "synthetic-private-note";
+    },
+    (value) => {
+      value.schemaVersion = "unknown";
+    },
+    (value) => {
+      value.bindings.push(structuredClone(value.bindings[0]));
+    },
+    (value) => {
+      value.bindings[0].factId = {};
+    },
+    (value) => {
+      value.bindings[0].review.documentHash = "invalid";
+    },
+    (value) => {
+      value.bindings[0].merge.sourceText = "synthetic-private-source";
+    },
+  ]) {
+    const changed = structuredClone(capture);
+    mutate(changed.authorization.localizationReviewEvidence);
+    assert.throws(() => buildAggregateExplanation(changed, binding), /localization_review_source_unverified/);
+  }
+  const db = new DatabaseSync(":memory:");
+  try {
+    const store = new AggregateExplanationStore({ db });
+    const saved = store.capture(capture, binding);
+    assert.deepEqual(
+      store.read(saved.document.snapshot.snapshotId).document.authorization.localizationReviewEvidence,
+      evidence,
+    );
+    saved.document.authorization.localizationReviewEvidence.bindings[0].review.extra = "synthetic-extra";
+    db.prepare("UPDATE pipeline_aggregate_explanations SET document=?,digest=? WHERE snapshot_id=?").run(
+      JSON.stringify(saved.document),
+      aggregateExplanationHash(saved.document),
+      saved.document.snapshot.snapshotId,
+    );
+    assert.throws(() => store.read(saved.document.snapshot.snapshotId), /aggregate_explanation_integrity_error/);
+  } finally {
+    db.close();
+  }
+});
+
 test("required private explanations revoke when reviewed recognition changes", async (t) => {
   const h = await harness(t);
   const config = structuredClone(h.options.config);
