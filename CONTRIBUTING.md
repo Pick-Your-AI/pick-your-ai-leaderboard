@@ -52,7 +52,7 @@ python scripts/render_docs.py --check
 
 The synchronizer updates derived counts and the UI mapping's backlog fingerprint after an intentional edit. It does not repair missing references or change delivery scope. Review generated diffs, including changed counts and metric meanings.
 
-CI checks structure, references, dependency cycles, mapping agreement, safe source URL shape, local Markdown links and generated-document drift. It does not fetch or certify source claims, prove API permissions, validate production metric accuracy, certify accessibility or deploy the app. Report these limits and supply the appropriate independent evidence.
+CI checks structure, references, dependency cycles, mapping agreement, safe source URL shape, local Markdown links and generated-document drift. Planning JSON object members must be unique, including equivalent escaped spellings; duplicate catalog, metric-definition and task fields fail validation before cross-document checks. It does not fetch or certify source claims, prove API permissions, validate production metric accuracy, certify accessibility or deploy the app. Report these limits and supply the appropriate independent evidence.
 
 ## Evidence, source rights and privacy
 
