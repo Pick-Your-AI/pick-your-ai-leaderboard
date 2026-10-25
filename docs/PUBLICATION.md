@@ -157,7 +157,10 @@ Duplicate/malformed/unknown markers, a planned title whose marker disappeared,
 changed or missing recorded identity, incomplete pagination, unknown native
 parents, parent conflicts, receipt corruption and plan drift all fail closed.
 Pending intents must have exactly their operation's defined fields; extra fields
-cannot suppress an uncertain operation. Clearing a parent intent requires positive
+cannot suppress an uncertain operation. Journal JSON objects require unique
+decoded member names at every depth, including equivalent escaped spellings. Ambiguous pending intents or identity
+bindings are rejected before adapter reads or mutations, retaining the journal
+bytes for explicit reconciliation. Clearing a parent intent requires positive
 native-edge readback. Supplied and durable issue numbers and immutable IDs must
 agree before their constraints are combined.
 Resolve the underlying ambiguity explicitly; the publisher never guesses a

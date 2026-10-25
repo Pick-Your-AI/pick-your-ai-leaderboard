@@ -187,6 +187,84 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaises(UncertainAction):
             pending_resolved(intent, report, inventory, REPO)
 
+    def test_duplicate_pending_member_cannot_resume_uncertain_operations(self):
+        for kind in ["create_issue", "attach_parent"]:
+            for key in ['"pending"', r'"pend\u0069ng"']:
+                with self.subTest(kind=kind, key=key):
+                    self.adapter = SyntheticAdapter()
+                    self.path.unlink(missing_ok=True)
+                    self.adapter.fail_before = kind
+                    with self.assertRaises(RuntimeError):
+                        self.apply()
+                    original = self.path.read_bytes()
+                    pending = json.loads(original)["pending"]
+                    self.assertEqual(kind, pending["kind"])
+                    with self.assertRaises(UncertainAction):
+                        self.apply()
+                    ambiguous = original.rstrip()[:-1] + (", " + key + ": null\n}").encode()
+                    self.path.write_bytes(ambiguous)
+                    calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+                    with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+                        self.apply()
+                    self.assertEqual(calls, self.adapter.calls)
+                    self.assertEqual(reads, self.adapter.reads)
+                    self.assertEqual(ambiguous, self.path.read_bytes())
+
+                    # Restoring the authoritative bytes cannot erase uncertainty.
+                    self.path.write_bytes(original)
+                    with self.assertRaises(UncertainAction):
+                        self.apply()
+                    self.assertEqual(calls, self.adapter.calls)
+                    # Simulate the original operation becoming visible remotely.
+                    if kind == "create_issue":
+                        self.adapter.create_issue(render_issue(self.specs[0]))
+                    else:
+                        self.adapter.attach_parent(2, 1, replace=False)
+                    self.assertTrue(self.apply()["noop"])
+                    self.assertEqual(3, len(self.adapter.issues))
+                    self.assertEqual(5, len(self.adapter.calls))
+                    self.assertEqual(0, self.apply()["mutations"])
+                    self.assertEqual(5, len(self.adapter.calls))
+
+    def test_duplicate_pending_member_is_rejected_in_either_order(self):
+        self.adapter.fail_before = "create_issue"
+        with self.assertRaises(RuntimeError):
+            self.apply()
+        original = self.path.read_bytes()
+        ambiguous = original.replace(b"{", b'{"pending": null,', 1)
+        self.path.write_bytes(ambiguous)
+        reads = self.adapter.reads
+        with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+            self.apply()
+        self.assertEqual(reads, self.adapter.reads)
+        self.assertEqual([], self.adapter.calls)
+        self.assertEqual(ambiguous, self.path.read_bytes())
+
+    def test_duplicate_nested_binding_member_cannot_hide_conflicting_identity(self):
+        self.apply(max_mutations=1)
+        original = self.path.read_text()
+        self.assertIn('"number": 1', original)
+        ambiguous = original.replace('"number": 1', '"number": 999, "number": 1', 1)
+        self.path.write_text(ambiguous)
+        calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+        with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+            self.apply()
+        self.assertEqual(calls, self.adapter.calls)
+        self.assertEqual(reads, self.adapter.reads)
+        self.assertEqual(ambiguous, self.path.read_text())
+
+    def test_identical_duplicate_journal_members_are_still_ambiguous(self):
+        self.assertTrue(self.apply()["noop"])
+        original = self.path.read_text()
+        ambiguous = original.replace('"schema_version": 1', '"schema_version": 1, "schema_version": 1', 1)
+        self.path.write_text(ambiguous)
+        calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+        with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+            self.apply()
+        self.assertEqual(calls, self.adapter.calls)
+        self.assertEqual(reads, self.adapter.reads)
+        self.assertEqual(ambiguous, self.path.read_text())
+
     def test_concurrent_body_progress_assignee_and_project_edits_are_preserved(self):
         self.apply(max_mutations=2)
         for issue in self.adapter.issues:

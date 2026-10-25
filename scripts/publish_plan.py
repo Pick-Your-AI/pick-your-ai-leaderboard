@@ -241,6 +241,16 @@ class Adapter(Protocol):
     def attach_parent(self, child_number: int, parent_number: int, *, replace: bool) -> None: ...
 
 
+def unique_journal_object(pairs):
+    """Retain uncertain intents by rejecting ambiguous persisted objects."""
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise PublicationError("Duplicate JSON object member in publication journal")
+        value[key] = item
+    return value
+
+
 class Journal:
     """Atomic, fsynced local receipts plus an OS lock released after a crash."""
     def __init__(self, path, repo, specs):
@@ -253,7 +263,7 @@ class Journal:
             return {"schema_version": 1, "repository_url": self.repo,
                     "plan_sha256": self.plan_hash, "bindings": {}, "pending": None}
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8"), object_pairs_hook=unique_journal_object)
             if (data["schema_version"] != 1 or data["repository_url"] != self.repo or
                     data["plan_sha256"] != self.plan_hash or not isinstance(data["bindings"], dict) or
                     not (data["pending"] is None or isinstance(data["pending"], dict))):
