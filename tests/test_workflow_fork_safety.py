@@ -65,6 +65,11 @@ UNTRUSTED_REF = re.compile(
     r"|event\.(?:number|pull_request\.number|issue\.number))|refs?/pull/",
     re.I,
 )
+# The audit does not evaluate arbitrary Actions expressions in checkout refs.
+# Only these complete dotted expressions have reviewed source semantics.
+SAFE_CHECKOUT_EXPRESSION = re.compile(
+    r"\$\{\{\s*github\.(?:sha|ref|event\.workflow_run\.head_sha)\s*\}\}", re.I,
+)
 SECRET_REFERENCE = re.compile(r"\bsecrets\b(?!\.GITHUB_TOKEN\b)", re.I)
 # GitHub-hosted runner labels; anything else (self-hosted, groups, custom or
 # larger-runner labels, expressions) is unreviewed and rejected for PR code.
@@ -529,6 +534,25 @@ def _expressions(text):
         index = position + 2
 
 
+def _decode_single_quoted_scalar(value):
+    """Decode a complete YAML single-quoted scalar, not expression or shell quotes."""
+    if len(value) >= 2 and value.startswith("'") and value.endswith("'"):
+        inner = value[1:-1]
+        if "'" not in inner.replace("''", ""):
+            return inner.replace("''", "'")
+    return value
+
+
+def _expression_line(line, in_body):
+    # A block/continuation line is already scalar content. Only structural
+    # values and list items have a YAML quote layer to remove before GitHub
+    # evaluates expressions; doubled YAML apostrophes are single characters.
+    if in_body:
+        return line
+    match = re.match(r"(?:(?:-\s+)*" + KEY + r":\s*|(?:-\s+)+)(.*)$", line)
+    return _decode_single_quoted_scalar(match.group(1)) if match else line
+
+
 def condition_terms(condition):
     """Split a job `if:` into its top-level `&&` terms.
 
@@ -745,12 +769,21 @@ def audit(text, reachable=None):
             if not ref_match:
                 continue
             ref = ref_match.group(1)
+            ref_value = _decode_single_quoted_scalar(ref)
+            if len(ref_value) >= 2 and ref_value.startswith('"') and ref_value.endswith('"'):
+                ref_value = ref_value[1:-1]
+            safe_expression = SAFE_CHECKOUT_EXPRESSION.fullmatch(ref_value)
             if UNTRUSTED_REF.search(ref):
                 problems.append(f"checkout of untrusted pull-request ref: {ref}")
-            elif "github.event.workflow_run" in ref.lower() and ref.strip("${}'\" ").lower() != "github.event.workflow_run.head_sha":
+            elif "github.event.workflow_run" in ref.lower() and not safe_expression and ref.strip("${}'\" ").lower() != "github.event.workflow_run.head_sha":
                 problems.append(f"checkout of unreviewed workflow_run ref: {ref}")
             elif "workflow_run" in ref.lower() and "workflow_run" not in events:
                 problems.append(f"workflow_run ref without workflow_run trigger: {ref}")
+            elif ("${{" in ref_value or "}}" in ref_value) and not safe_expression:
+                # Match the whole YAML-unwrapped value. Whitespace inside a
+                # property path, computed access, indexing and concatenated or
+                # malformed wrappers must not disguise an unreviewed context.
+                problems.append(f"unsupported checkout ref expression: {ref}")
 
     for indent, line in structural:
         match = KEY_VALUE.match(line)
@@ -772,12 +805,12 @@ def audit(text, reachable=None):
     # Only `${{ }}` expressions reference secrets; step names and quoted literals
     # that merely mention the word do not. Run bodies are included because their
     # expressions are evaluated before the shell sees them.
-    expressions = _expressions("\n".join(line for _, line, _ in entries))
+    expressions = _expressions("\n".join(_expression_line(line, body) for _, line, body in entries))
     # `if:` values are expressions even without ${{ }}.
     for position, (indent, line) in enumerate(structural):
         match = re.match(r"((?:-\s+)*)if:\s*(.*)", line)
         if match:
-            expressions.append(match.group(2))
+            expressions.append(_decode_single_quoted_scalar(match.group(2)))
             # The key sits after any `- ` prefix; the rest of a folded or plain
             # multi-line condition is indented deeper, siblings are not.
             key_indent = indent + len(match.group(1))
@@ -1647,6 +1680,58 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             self.rejected(lambda t, r=ref: RUN_GOOD.replace(
                 "ref: ${{ github.event.workflow_run.head_sha }}", f"ref: {r}"), "workflow_run ref" if "head_branch" in ref else "untrusted pull-request ref", RUN_GOOD)
 
+    def test_unreviewed_checkout_expressions_fail_closed_in_fixtures_and_real_workflows(self):
+        texts = self.texts()
+        expressions = (
+            "${{ github['head_ref'] }}",
+            "${{ github.event.pull_request['head']['sha'] }}",
+            "${{ github['event']['pull_request']['head']['sha'] }}",
+            "${{ github['event']['workflow_run']['head_branch'] }}",
+            "${{ github.event.workflow_run['head_branch'] }}",
+            "${{ github[format('head_{0}', 'ref')] }}",
+            # The audit deliberately does not interpret even benign computed
+            # expressions; only the complete reviewed dotted forms are supported.
+            "${{ github['event']['workflow_run']['head_sha'] }}",
+            "${{ github . head_ref }}",
+            "${{ github.event.pull_request . head.sha }}",
+            "${{ fromJSON(toJSON(github)).head_ref }}",
+            "${{ (github.sha) }}",
+            "prefix-${{ github.sha }}",
+            "${{ github.sha }}-suffix",
+            "${{ github.sha }}${{ github.ref }}",
+            "${{ github.sha }",
+            "${ github.sha }}",
+            "${{ 'release[1]' }}",
+            "${{ format('release[{0}]', 1) }}",
+        )
+        for expression in expressions:
+            for ref in (expression, '"' + expression + '"', "'" + expression.replace("'", "''") + "'"):
+                with self.subTest(ref=ref):
+                    changed = GOOD.replace("persist-credentials: false", "persist-credentials: false\n          ref: " + ref)
+                    self.assertTrue(any("ref" in p for p in audit(changed)))
+                    self.assertTrue(any("ref" in p for p in audit_all({"fixture.yml": changed})["fixture.yml"]))
+                    for name in ("runtime-ci.yml", "prepare-site.yml"):
+                        changed = texts[name]
+                        if name == "runtime-ci.yml":
+                            changed = changed.replace("persist-credentials: false", "persist-credentials: false\n          ref: " + ref, 1)
+                        else:
+                            changed = changed.replace("ref: ${{ github.event.workflow_run.head_sha }}", "ref: " + ref, 1)
+                        self.assertNotEqual(changed, texts[name])
+                        self.assertTrue(any("ref" in p for p in audit(changed)), name)
+                        self.assertTrue(any("ref" in p for p in audit_all({**texts, name: changed})[name]), name)
+        # Static refs, including literal brackets, and whole reviewed expressions
+        # remain accepted with ordinary YAML quoting and context-name casing.
+        for value in ("main", "refs/heads/main", "refs/tags/v1", "release[1]", "${{ github.sha }}", "${{ GITHUB.REF }}"):
+            for ref in (value, '"' + value + '"', "'" + value + "'"):
+                changed = GOOD.replace("persist-credentials: false", "persist-credentials: false\n          ref: " + ref)
+                self.assertEqual(audit(changed), [], ref)
+        for value in ("${{ github.event.workflow_run.head_sha }}", "${{ GITHUB.EVENT.WORKFLOW_RUN.HEAD_SHA }}", "${{\tgithub.event.workflow_run.head_sha\t}}"):
+            for ref in (value, '"' + value + '"', "'" + value + "'"):
+                changed = RUN_GOOD.replace("${{ github.event.workflow_run.head_sha }}", ref)
+                self.assertEqual(audit(changed), [], ref)
+                changed = GOOD.replace("persist-credentials: false", "persist-credentials: false\n          ref: " + ref)
+                self.assertTrue(any("workflow_run ref without" in p for p in audit(changed)), ref)
+
     def run_with(self, expression, layout="inline"):
         """RUN_GOOD with its job condition replaced by `expression`."""
         start = RUN_GOOD.index("    if: >-")
@@ -2017,6 +2102,46 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         ):
             self.rejected(lambda t, e=expression: t + f"      - run: x\n        env:\n          V: {e}\n", "secret other than GITHUB_TOKEN")
         self.assertEqual(audit(GOOD + "      - run: x\n        env:\n          V: ${{ format('}}{0}', github.run_id) }}\n"), [])
+
+    def test_yaml_doubled_apostrophes_cannot_hide_secret_expressions(self):
+        texts = self.texts()
+        templates = {
+            "run": "      - run: %s\n",
+            "script": "      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea\n        with:\n          script: %s\n",
+            "env": "      - run: x\n        env:\n          VALUE: %s\n",
+            "with": "      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1\n        with:\n          token: %s\n",
+            "name": "      - name: %s\n        run: x\n",
+            "list item": "      - run: x\n        args:\n          - %s\n",
+            "if": "      - if: %s\n        run: x\n",
+        }
+        for expression in (
+            "${{ contains('}}', '}') && secrets.K }}",
+            "${{ format('}}{0}', secrets.K) }}",
+            "${{ contains('it''s }}', '}') && SECRETS.K }}",
+        ):
+            for scalar in (expression, '"' + expression + '"', "'" + expression.replace("'", "''") + "'"):
+                for label, template in templates.items():
+                    with self.subTest(expression=expression, scalar=scalar, location=label):
+                        step = template % scalar
+                        self.assertTrue(any("secret other than GITHUB_TOKEN" in p for p in audit(GOOD + step)))
+                        self.assertTrue(any("secret other than GITHUB_TOKEN" in p for p in audit_all({"fixture.yml": GOOD + step})["fixture.yml"]))
+                        for name in ("runtime-ci.yml", "prepare-site.yml"):
+                            changed = texts[name] + step
+                            self.assertTrue(any("secret other than GITHUB_TOKEN" in p for p in audit_all({**texts, name: changed})[name]), name)
+        # Bare conditions also pass through YAML decoding before the secret scan.
+        bare = "contains('}}', '}') && secrets.K"
+        step = templates["if"] % ("'" + bare.replace("'", "''") + "'")
+        self.assertTrue(any("secret other than GITHUB_TOKEN" in p for p in audit(GOOD + step)))
+        # Literal delimiters and literal secret names remain data after decoding.
+        for expression in (
+            "${{ contains('}}', '}') && github.run_id }}",
+            "${{ contains('it''s }}', '}') && github.run_id }}",
+            "${{ 'secrets.K' == 'secrets.K' }}",
+        ):
+            scalar = "'" + expression.replace("'", "''") + "'"
+            for label, template in templates.items():
+                with self.subTest(positive=expression, location=label):
+                    self.assertEqual(audit(GOOD + template % scalar), [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
