@@ -241,14 +241,18 @@ class Adapter(Protocol):
     def attach_parent(self, child_number: int, parent_number: int, *, replace: bool) -> None: ...
 
 
-def unique_journal_object(pairs):
-    """Retain uncertain intents by rejecting ambiguous persisted objects."""
+def unique_publication_object(pairs):
+    """Reject ambiguity before a member can overwrite publication inputs."""
     value = {}
     for key, item in pairs:
         if key in value:
-            raise PublicationError("Duplicate JSON object member in publication journal")
+            raise PublicationError("Duplicate JSON object member in publication input")
         value[key] = item
     return value
+
+
+def load_publication_json(path):
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_publication_object)
 
 
 class Journal:
@@ -263,7 +267,7 @@ class Journal:
             return {"schema_version": 1, "repository_url": self.repo,
                     "plan_sha256": self.plan_hash, "bindings": {}, "pending": None}
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"), object_pairs_hook=unique_journal_object)
+            data = load_publication_json(self.path)
             if (data["schema_version"] != 1 or data["repository_url"] != self.repo or
                     data["plan_sha256"] != self.plan_hash or not isinstance(data["bindings"], dict) or
                     not (data["pending"] is None or isinstance(data["pending"], dict))):
@@ -433,11 +437,11 @@ def main():
     parser.add_argument("--publication", type=Path, default=ROOT / "docs/PUBLICATION.json")
     args = parser.parse_args()
     try:
-        backlog = json.loads(args.backlog.read_text())
-        publication = json.loads(args.publication.read_text())
+        backlog = load_publication_json(args.backlog)
+        publication = load_publication_json(args.publication)
         specs = specs_from_backlog(backlog)
         repo = repository(publication["repository_url"])
-        report = reconcile(specs, json.loads(args.inventory.read_text()), repo,
+        report = reconcile(specs, load_publication_json(args.inventory), repo,
                            publication_bindings(publication, specs, repo))
         print(json.dumps({"mode": "read-only dry run", **report}, indent=2, sort_keys=True))
     except (OSError, ValueError, KeyError, TypeError) as error:

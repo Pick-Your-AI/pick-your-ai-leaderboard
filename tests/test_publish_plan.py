@@ -513,5 +513,44 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(2, subprocess.run(args + ["--apply"], capture_output=True).returncode)
 
 
+    def test_cli_rejects_ambiguous_inputs_without_writes_and_recovers(self):
+        self.apply()
+        original = {
+            "inventory": json.dumps(self.adapter.inventory()),
+            "publication": json.dumps({"repository_url": REPO, "issue_urls": {}}),
+            "backlog": json.dumps({"program": self.specs[0],
+                "epics": [{**self.specs[1], "work_packages": [self.specs[2]]}]}),
+        }
+        files = {key: Path(self.temp.name) / (key + ".json") for key in original}
+        args = [sys.executable, str(ROOT / "scripts/publish_plan.py")]
+        for key, path in files.items():
+            args += ["--" + key, str(path)]
+        cases = [
+            ("inventory", '"id": 1001', '"id": 9999, "id": 1001'),
+            ("publication", "{", '{"repository_url": "https://github.com/synthetic/other",'),
+            ("backlog", '"parent": "LB"', '"parent": "LB-99", "parent": "LB"'),
+            ("inventory", "{", r'{"st\u0061te": "closed",'),
+        ]
+        calls = copy.deepcopy(self.adapter.calls)
+        for key, before, after in cases:
+            with self.subTest(input=key, member=after):
+                for name, path in files.items():
+                    path.write_text(original[name], encoding="utf-8")
+                self.assertIn(before, original[key])
+                files[key].write_text(original[key].replace(before, after, 1), encoding="utf-8")
+                saved = {path.name: path.read_bytes() for path in Path(self.temp.name).iterdir()}
+                result = subprocess.run(args, capture_output=True, text=True)
+                self.assertEqual(2, result.returncode, result.stdout)
+                self.assertIn("Duplicate JSON object member", result.stderr)
+                self.assertEqual("", result.stdout)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(saved, {path.name: path.read_bytes() for path in Path(self.temp.name).iterdir()})
+                files[key].write_text(original[key], encoding="utf-8")
+                restored = subprocess.run(args, capture_output=True, text=True)
+                self.assertEqual(0, restored.returncode, restored.stderr)
+                self.assertTrue(json.loads(restored.stdout)["noop"])
+                self.assertEqual(calls, self.adapter.calls)
+
+
 if __name__ == "__main__":
     unittest.main()

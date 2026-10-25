@@ -53,6 +53,10 @@ python -m unittest discover -s tests -p test_publish_plan.py -v
 
 The CLI only reads local files and writes a plan to stdout. `--backlog` and
 `--publication` can select reviewed alternate input files. There is no `--apply`.
+All three input files require unique decoded JSON object member names, including
+equivalent escaped spellings. Contradictory plans, repository bindings and
+inventory identities stop the CLI before it emits a reconciliation report.
+
 The versioned receipt intentionally omits issue bodies and is not an inventory
 input. Do not reconstruct bodies from hashes or present reconstructed data as a
 live read. Raw reads should remain in temporary/private working storage.
