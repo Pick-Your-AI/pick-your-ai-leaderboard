@@ -169,6 +169,34 @@ class PlanningJsonTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Duplicate JSON object member"):
             validate_files(self.root)
 
+    def test_nonfinite_numbers_rejected_in_every_input_without_writes(self):
+        for name in FILES.values():
+            path = self.root / "planning" / name
+            original = path.read_bytes()
+            for token in ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"]:
+                with self.subTest(document=name, token=token):
+                    malformed = original.replace(b"{", ('{"probe": [{"value": ' + token + '}],').encode(), 1)
+                    path.write_bytes(malformed)
+                    with self.assertRaisesRegex(ValueError, "Non-finite JSON number"):
+                        load_bundle(self.root)
+                    if name == "ui/ui-backlog-coverage.json":
+                        with self.assertRaisesRegex(ValueError, "Non-finite JSON number"):
+                            validate_files(self.root)
+                    result = self.run_cli()
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("Non-finite JSON number", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertNotIn("Valid plan:", result.stdout)
+                    self.assertEqual(malformed, path.read_bytes())
+                    path.write_bytes(original)
+            self.assertEqual(0, self.run_cli().returncode)
+
+    def test_finite_numbers_and_numeric_strings_remain_valid(self):
+        path = self.root / "finite.json"
+        data = '{"values": [1.25, -0.0, 1e308, 1e-999, 123456789012345678901234567890, "NaN", "Infinity", "1e999"]}'
+        path.write_text(data, encoding="utf-8")
+        self.assertEqual(json.loads(data), load_json(path))
+
     def test_repeated_member_names_in_separate_objects_remain_valid(self):
         path = self.root / "separate-objects.json"
         path.write_text('{"items": [{"id": "first"}, {"id": "second"}]}', encoding="utf-8")

@@ -6,6 +6,7 @@ import argparse
 import collections
 import hashlib
 import json
+import math
 import pathlib
 import re
 import sys
@@ -34,8 +35,20 @@ def unique_json_object(pairs):
     return value
 
 
+def reject_nonfinite_number(token):
+    raise ValueError("Non-finite JSON number")
+
+
+def finite_json_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        reject_nonfinite_number(token)
+    return value
+
+
 def load_json(path):
-    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object,
+                      parse_constant=reject_nonfinite_number, parse_float=finite_json_float)
 
 
 def load_bundle(root=ROOT):
