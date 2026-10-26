@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -251,8 +252,20 @@ def unique_publication_object(pairs):
     return value
 
 
+def reject_nonfinite_number(token):
+    raise PublicationError("Non-finite JSON number")
+
+
+def finite_json_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        reject_nonfinite_number(token)
+    return value
+
+
 def load_publication_json(path):
-    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_publication_object)
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_publication_object,
+                      parse_constant=reject_nonfinite_number, parse_float=finite_json_float)
 
 
 class Journal:

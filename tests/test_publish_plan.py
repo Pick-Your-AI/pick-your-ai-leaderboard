@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from publish_plan import (Journal, NAMESPACE, PublicationError, UncertainAction,
-                          collect_inventory, digest, pending_resolved, publication_bindings, publish,
+                          collect_inventory, digest, load_publication_json, pending_resolved, publication_bindings, publish,
                           reconcile, render_issue, specs_from_backlog, verification_receipt)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -512,6 +512,65 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue(json.loads(result.stdout)["noop"])
         self.assertEqual(2, subprocess.run(args + ["--apply"], capture_output=True).returncode)
 
+
+    def test_nonfinite_journal_rejected_before_adapter_activity(self):
+        self.adapter.fail_before = "create_issue"
+        with self.assertRaises(RuntimeError):
+            self.apply()
+        original = self.path.read_bytes()
+        for token in ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"]:
+            with self.subTest(token=token):
+                malformed = original.replace(b"{", ('{"probe": [{"value": ' + token + '}],').encode(), 1)
+                self.path.write_bytes(malformed)
+                calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+                with self.assertRaisesRegex(PublicationError, "Non-finite JSON number"):
+                    self.apply()
+                self.assertEqual(calls, self.adapter.calls)
+                self.assertEqual(reads, self.adapter.reads)
+                self.assertEqual(malformed, self.path.read_bytes())
+        self.path.write_bytes(original)
+        with self.assertRaises(UncertainAction):
+            self.apply()
+        self.adapter.create_issue(render_issue(self.specs[0]))
+        self.assertTrue(self.apply()["noop"])
+        self.assertEqual(5, len(self.adapter.calls))
+        self.assertEqual(0, self.apply()["mutations"])
+        self.assertEqual(5, len(self.adapter.calls))
+
+    def test_nonfinite_cli_inputs_rejected_without_output_or_writes(self):
+        self.apply()
+        originals = {
+            "inventory": json.dumps(self.adapter.inventory()),
+            "publication": json.dumps({"repository_url": REPO, "issue_urls": {}}),
+            "backlog": json.dumps({"program": self.specs[0],
+                "epics": [{**self.specs[1], "work_packages": [self.specs[2]]}]}),
+        }
+        files = {key: Path(self.temp.name) / (key + ".json") for key in originals}
+        args = [sys.executable, str(ROOT / "scripts/publish_plan.py")]
+        for key, path in files.items():
+            args += ["--" + key, str(path)]
+            path.write_text(originals[key], encoding="utf-8")
+        for key, path in files.items():
+            for token in ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"]:
+                with self.subTest(input=key, token=token):
+                    path.write_text(originals[key].replace("{", '{"probe": [{"value": ' + token + '}],', 1), encoding="utf-8")
+                    saved = {p.name: p.read_bytes() for p in Path(self.temp.name).iterdir()}
+                    result = subprocess.run(args, capture_output=True, text=True)
+                    self.assertEqual(2, result.returncode)
+                    self.assertIn("Non-finite JSON number", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual("", result.stdout)
+                    self.assertEqual(saved, {p.name: p.read_bytes() for p in Path(self.temp.name).iterdir()})
+                    path.write_text(originals[key], encoding="utf-8")
+            restored = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(0, restored.returncode, restored.stderr)
+            self.assertTrue(json.loads(restored.stdout)["noop"])
+
+    def test_finite_numbers_and_numeric_strings_remain_valid(self):
+        path = Path(self.temp.name) / "finite.json"
+        data = '{"values": [1.25, -0.0, 1e308, 1e-999, 123456789012345678901234567890, "NaN", "Infinity", "1e999"]}'
+        path.write_text(data, encoding="utf-8")
+        self.assertEqual(json.loads(data), load_publication_json(path))
 
     def test_cli_rejects_ambiguous_inputs_without_writes_and_recovers(self):
         self.apply()
