@@ -1,5 +1,7 @@
 # Contributing
 
+Current team and Project names: [organization naming register](https://github.com/Pick-Your-AI/.github/blob/ce8c876f6331b4f427d7fc8c2deff4776d003cf5/docs/NAMING.md).
+
 This repository owns the Pick Your AI contributor-recognition delivery plan and service implementation. Read the [product scope](docs/PRODUCT.md), [delivery plan](docs/DELIVERY_PLAN.md) and your issue before starting. The repository contains planning tools, source and metric packages, public and protected services, and a browser application. Remaining implementation, source authorization and public release remain tracked work.
 
 ## First local fixture journey
@@ -68,7 +70,7 @@ Early contributors push branches named `contrib/<your-login>/<topic>` to this re
 
 ### Access and roles
 
-As of 2026-10-19, access follows the Pick-Your-AI team model: parent teams under `Maintainers` get Triage, and push access is held by child teams. For this repository, the `Lead Maintainers` team (@CompleteDotTech and @BunsDev) has Admin, the `leaderboard.pickyour.ai` team (@CompleteDotTech, @karutoil, @BunsDev and @pushingsquares) has Write, the `Websites` parent team has Triage, and the `Early Contributors` team has Write for `contrib/<your-login>/<topic>` branches. Only the Lead Maintainers change team membership. [CODEOWNERS](.github/CODEOWNERS) routes review only and grants no access, and team membership does not waive the pull request approval and required checks above.
+Current naming uses `Organization Maintainers` for the top-level team, `Contributor Leaderboard` for this repository's contributor team, `Lead Maintainers - Contributor Leaderboard` for its specialist lead team, and `Lead Maintainers - Websites` for shared website leadership. The `Websites` parent team and `Early Contributors` retain their names. GitHub grants remain authoritative; this naming update does not change permissions or assign operational ownership. Team membership and settings are managed by organization owners and designated GitHub team maintainers under the [accepted delegation record](https://github.com/Pick-Your-AI/.github/issues/18). [CODEOWNERS](.github/CODEOWNERS) routes review only and grants no access, and team membership does not waive the pull request approval and required checks above.
 
 ## Review and completion
 
