@@ -132,6 +132,11 @@ The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research)
 The structured plan lives in [planning/](planning/README.md). See [local runtime setup](docs/runtime-foundation.md) for Node.js 24 startup, database migrations and explicitly synthetic fixtures, and [ingestion operations](docs/INGESTION.md) for the separate collector primitives. Public hosting and the proposed contributor subdomain require their own approved decisions and operational proof.
 
 [MIT license](LICENSE) · [Security reporting](SECURITY.md)
+
+## Contributor routing
+
+For a blocked decision, use [the repository routing procedure](CONTRIBUTING.md#routing-decisions).
+Start with the existing issue and its accepted owner; preserve its scope and evidence requirements.
 """
     out["docs/DELIVERY_PLAN.md"] = f"""# Delivery plan
 
