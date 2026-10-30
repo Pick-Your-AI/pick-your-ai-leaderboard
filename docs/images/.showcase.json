@@ -1,0 +1,70 @@
+{
+ "config_sha256": "bd2386d654a06b2602ae9a379db613a44b7718a69e59e596c1aa59b3a6519e56",
+ "fingerprint": "e5527e97ba6642a608c29c3fd606c7b3f7b62f5d4ccfdc123b37871cc0af7fe8",
+ "inputs": {
+  "description": "Public contributor recognition for Pick Your AI: leaderboard delivery plan, metric definitions, evidence and governance.",
+  "icon_sha256": "a6b9e3b330b26a1b74e26da2115a47ae28e00c527efad382d9c0065f74559414",
+  "language": "JavaScript",
+  "license": "MIT",
+  "override_sha256": null,
+  "owner": "Pick-Your-AI",
+  "repo": "pick-your-ai-leaderboard",
+  "topics": [
+   "community",
+   "contributors",
+   "github-api",
+   "leaderboard",
+   "metrics",
+   "open-source",
+   "pick-your-ai",
+   "python"
+  ],
+  "type": "infrastructure",
+  "visibility": "public"
+ },
+ "outputs": {
+  "banner.png": {
+   "bytes": 70870,
+   "chips": [
+    {
+     "box": [
+      520,
+      240.1,
+      118.7,
+      38
+     ],
+     "kind": "attr",
+     "source": "manifest",
+     "text": "Node 24+"
+    },
+    {
+     "box": [
+      650.7,
+      240.1,
+      63.6,
+      38
+     ],
+     "kind": "attr",
+     "source": "license",
+     "text": "MIT"
+    }
+   ],
+   "icon_source": "repo",
+   "px": [
+    2560,
+    720
+   ],
+   "repository_id": 1422874501,
+   "scale": 2,
+   "sha256": "ce1fd6b88959401d933a60c1ca3d6d3d8432a5ce2d78b9666632fa66255a7d1f"
+  },
+  "card.svg": {
+   "bytes": 21125,
+   "repository_id": 1422874501,
+   "sha256": "3dcaaf18ad2d89c696673d9eae2594438b3ef9195306e3fc56b074feea57af05"
+  }
+ },
+ "schema": 1,
+ "skill_version": "1.0.0",
+ "standard": "ct-std-v1"
+}
