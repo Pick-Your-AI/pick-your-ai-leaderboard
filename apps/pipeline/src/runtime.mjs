@@ -94,6 +94,11 @@ import {
   startGithubContentEditRun,
 } from "./content-edit-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
+import {
+  privateLocalizationReviewMetadata,
+  materializeLocalizationReviews,
+  assertLocalizationReviewCapture,
+} from "./localization-review-participation.mjs";
 import { retainPhysicalContext } from "./physical-context.mjs";
 import {
   mergeTargetNormalizationVersion,
@@ -112,6 +117,7 @@ import {
   discussionSourceNormalizationVersion,
   githubSnapshotRevision,
   reviewSourceNormalizationVersion,
+  localizationReviewNormalizationVersion,
   relationshipPairNormalizationVersion,
 } from "@pick-your-ai/github";
 import {
@@ -470,9 +476,17 @@ export async function createPipeline(options) {
   const documentationNormalizationSignature = classificationPolicies.documentation.length
     ? digest(["documentation-locales/v2", attributionNormalizationSignature])
     : attributionNormalizationSignature;
+  const localizationReviews = config.policies.some(
+    ({ policy }) => policy.metricId === "localization" && policy.roles?.includes("reviewer"),
+  );
+  // Only explicit reviewer enrollment gains the two-source projection. Preserve
+  // every author-only and unrelated configuration's existing cache identity.
+  const localizationNormalizationSignature = localizationReviews
+    ? digest([localizationReviewNormalizationVersion, documentationNormalizationSignature])
+    : documentationNormalizationSignature;
   const verifiedMergeNormalizationSignature = digest([
     "verified-default-branch-merge-pins/v1",
-    documentationNormalizationSignature,
+    localizationNormalizationSignature,
   ]);
   // Retained Project history still participates after active collection stops.
   // Keep its new semantics in a distinct cache generation for every configuration,
@@ -840,7 +854,8 @@ export async function createPipeline(options) {
         historyBudget
           ? `WITH retained AS MATERIALIZED (${normalizationQuery}),
             bounded AS MATERIALIZED (
-              SELECT retained.*,CASE WHEN document ? 'pullRequestMergeTargetNormalization' THEN
+              SELECT retained.*,CASE WHEN document ? 'pullRequestMergeTargetNormalization'
+                OR document ? 'localizationReviewNormalizationVersion' THEN
                 jsonb_build_object('subjectId',source_document->'subjectId','sourceUrl',source_document->'sourceUrl',
                   'sourceRevision',source_document->'sourceRevision') END AS source_binding
               FROM retained
@@ -948,8 +963,32 @@ export async function createPipeline(options) {
       }
       await validateMergeTargetRow(row, mergeAuthorization?.cutoff ?? null);
     }
+    if (localizationReviews) {
+      assertLocalizationReviewNormalizer();
+      for (const row of retained) {
+        if (!["pull_requests", "reviews"].includes(row.family)) continue;
+        if (row.document.localizationReviewNormalizationVersion !== localizationReviewNormalizationVersion)
+          fail("localization_review_normalization_obsolete");
+        privateLocalizationReviewMetadata(row.document, { ...row, document: row.source_document }, true);
+      }
+      assertLocalizationReviewCapture(
+        authorization.localizationReviewEvidence,
+        retained,
+        classificationPolicies.documentation,
+        digest,
+      );
+    }
     return retained;
   }
+  const assertLocalizationReviewNormalizer = () => {
+    if (
+      localizationReviews &&
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.localizationReviewNormalizationVersion
+        : options.localizationReviewNormalizationVersion) !== localizationReviewNormalizationVersion
+    )
+      fail("localization_review_normalizer_version_unverified");
+  };
   const reviewEvidenceCurrent = (row) =>
     row.family !== "reviews" ||
     (digest(row.document) === row.document_hash &&
@@ -1367,6 +1406,8 @@ export async function createPipeline(options) {
           canonical(authorization.identityEvidence)) ||
       canonical(retained.document.identityAuthorization?.issueTransferEvidence) !==
         canonical(authorization.issueTransferEvidence) ||
+      canonical(retained.document.identityAuthorization?.localizationReviewEvidence) !==
+        canonical(authorization.localizationReviewEvidence) ||
       canonical(retained.document.identityAuthorization?.discussionFeedbackEvidence) !==
         canonical(authorization.discussionFeedbackEvidence) ||
       canonical(retained.document.identityAuthorization?.relationshipPairEvidence) !==
@@ -1936,6 +1977,7 @@ export async function createPipeline(options) {
           assertAuthorized: () => assertRunConfiguration(),
           verifyDiscussionFeedbackSource: (input) => feedbackStore.verifyInput(input),
           documentationPolicies: config.documentationPolicies ?? [],
+          localizationReviews,
           researchPolicies: config.researchPolicies ?? [],
           releaseInclusionTargets: config.releaseInclusionTargets ?? [],
           ...(mergeTargetRepositoryIds.length ? { pullRequestMergeTargetRepositoryIds: mergeTargetRepositoryIds } : {}),
@@ -2534,6 +2576,7 @@ export async function createPipeline(options) {
             generation.relationshipPair === relationshipPair,
         ).signature;
       const assertRowNormalizer = () => {
+        assertLocalizationReviewNormalizer();
         if (mergeTargetSource) assertMergeTargetNormalizer();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
@@ -2569,6 +2612,9 @@ export async function createPipeline(options) {
         if (
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
+          (!localizationReviews ||
+            !["pull_requests", "reviews"].includes(row.family) ||
+            cached.document.localizationReviewNormalizationVersion === localizationReviewNormalizationVersion) &&
           (!mergeTargetSource ||
             cached.document.pullRequestMergeTargetNormalization?.generation === mergeTargetPass.generation) &&
           (!fieldChange || cached.document.fieldChangeNormalizationVersion === fieldChangeNormalizationVersion) &&
@@ -2602,6 +2648,7 @@ export async function createPipeline(options) {
           }) &&
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
+          privateLocalizationReviewMetadata(cached.document, row, localizationReviews);
           if (mergeTargetSource) {
             await validateMergeTargetRow(
               { ...row, ...cached, source_document: row.document },
@@ -2836,6 +2883,7 @@ export async function createPipeline(options) {
         syntheticFactIds = [...output.syntheticFactIds];
       }
       const document = {
+        ...privateLocalizationReviewMetadata(output, row, localizationReviews),
         ...(relationshipPair ? { relationshipPairNormalizationVersion } : {}),
         ...(mergeTargetSource
           ? {
@@ -3277,6 +3325,7 @@ export async function createPipeline(options) {
     );
     const ready = () => {
       assertRunConfiguration();
+      assertLocalizationReviewNormalizer();
       if (hasReviewSources) assertReviewNormalizer();
       if (hasDiscussionSources) assertDiscussionNormalizer();
       if (hasDefaultDeliverySources) assertDefaultDeliveryNormalizer();
@@ -3356,6 +3405,25 @@ export async function createPipeline(options) {
         context: scope.context ?? "event",
       },
     ).outputs;
+    const localeReviewProjection = localizationReviews
+      ? materializeLocalizationReviews(
+          normalized.filter(
+            (entry) =>
+              !suppressedArtifactIds.has(entry.document.localizationMergeSource?.artifactId) &&
+              !suppressedArtifactIds.has(entry.document.localizationReviewSource?.artifactId),
+          ),
+          classificationPolicies.documentation,
+          digest,
+        )
+      : null;
+    if (localeReviewProjection) {
+      outputs.push({
+        facts: localeReviewProjection.facts,
+        actors: [],
+        evidence: localeReviewProjection.evidence,
+        ...(dataMode === "synthetic" ? { isSynthetic: true } : {}),
+      });
+    }
     let decidedProjection = null;
     if (
       scopedDecisionCapture !== null &&
@@ -3838,6 +3906,7 @@ export async function createPipeline(options) {
           // hash-only historical captures can otherwise be ambiguous across families.
           normalizationSources,
         },
+        ...(localeReviewProjection === null ? {} : { localizationReviewEvidence: localeReviewProjection.capture }),
         ...mergeTargetAuthorization(scope, observationCutoff),
         issueTransferEvidence: transferAuthority.capture,
         ...(scopedDecisionCapture === null ? {} : { pullRequestDecisionEvidence: scopedDecisionCapture }),
