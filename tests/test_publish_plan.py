@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from publish_plan import (Journal, NAMESPACE, PublicationError, UncertainAction,
-                          collect_inventory, digest, pending_resolved, publication_bindings, publish,
+                          collect_inventory, digest, load_publication_json, pending_resolved, publication_bindings, publish,
                           reconcile, render_issue, specs_from_backlog, verification_receipt)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -186,6 +186,84 @@ class PublicationTests(unittest.TestCase):
         intent = {"kind": "attach_parent", "plan_id": "LB-01", "parent_id": "LB"}
         with self.assertRaises(UncertainAction):
             pending_resolved(intent, report, inventory, REPO)
+
+    def test_duplicate_pending_member_cannot_resume_uncertain_operations(self):
+        for kind in ["create_issue", "attach_parent"]:
+            for key in ['"pending"', r'"pend\u0069ng"']:
+                with self.subTest(kind=kind, key=key):
+                    self.adapter = SyntheticAdapter()
+                    self.path.unlink(missing_ok=True)
+                    self.adapter.fail_before = kind
+                    with self.assertRaises(RuntimeError):
+                        self.apply()
+                    original = self.path.read_bytes()
+                    pending = json.loads(original)["pending"]
+                    self.assertEqual(kind, pending["kind"])
+                    with self.assertRaises(UncertainAction):
+                        self.apply()
+                    ambiguous = original.rstrip()[:-1] + (", " + key + ": null\n}").encode()
+                    self.path.write_bytes(ambiguous)
+                    calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+                    with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+                        self.apply()
+                    self.assertEqual(calls, self.adapter.calls)
+                    self.assertEqual(reads, self.adapter.reads)
+                    self.assertEqual(ambiguous, self.path.read_bytes())
+
+                    # Restoring the authoritative bytes cannot erase uncertainty.
+                    self.path.write_bytes(original)
+                    with self.assertRaises(UncertainAction):
+                        self.apply()
+                    self.assertEqual(calls, self.adapter.calls)
+                    # Simulate the original operation becoming visible remotely.
+                    if kind == "create_issue":
+                        self.adapter.create_issue(render_issue(self.specs[0]))
+                    else:
+                        self.adapter.attach_parent(2, 1, replace=False)
+                    self.assertTrue(self.apply()["noop"])
+                    self.assertEqual(3, len(self.adapter.issues))
+                    self.assertEqual(5, len(self.adapter.calls))
+                    self.assertEqual(0, self.apply()["mutations"])
+                    self.assertEqual(5, len(self.adapter.calls))
+
+    def test_duplicate_pending_member_is_rejected_in_either_order(self):
+        self.adapter.fail_before = "create_issue"
+        with self.assertRaises(RuntimeError):
+            self.apply()
+        original = self.path.read_bytes()
+        ambiguous = original.replace(b"{", b'{"pending": null,', 1)
+        self.path.write_bytes(ambiguous)
+        reads = self.adapter.reads
+        with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+            self.apply()
+        self.assertEqual(reads, self.adapter.reads)
+        self.assertEqual([], self.adapter.calls)
+        self.assertEqual(ambiguous, self.path.read_bytes())
+
+    def test_duplicate_nested_binding_member_cannot_hide_conflicting_identity(self):
+        self.apply(max_mutations=1)
+        original = self.path.read_text()
+        self.assertIn('"number": 1', original)
+        ambiguous = original.replace('"number": 1', '"number": 999, "number": 1', 1)
+        self.path.write_text(ambiguous)
+        calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+        with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+            self.apply()
+        self.assertEqual(calls, self.adapter.calls)
+        self.assertEqual(reads, self.adapter.reads)
+        self.assertEqual(ambiguous, self.path.read_text())
+
+    def test_identical_duplicate_journal_members_are_still_ambiguous(self):
+        self.assertTrue(self.apply()["noop"])
+        original = self.path.read_text()
+        ambiguous = original.replace('"schema_version": 1', '"schema_version": 1, "schema_version": 1', 1)
+        self.path.write_text(ambiguous)
+        calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+        with self.assertRaisesRegex(PublicationError, "Duplicate.*member"):
+            self.apply()
+        self.assertEqual(calls, self.adapter.calls)
+        self.assertEqual(reads, self.adapter.reads)
+        self.assertEqual(ambiguous, self.path.read_text())
 
     def test_concurrent_body_progress_assignee_and_project_edits_are_preserved(self):
         self.apply(max_mutations=2)
@@ -433,6 +511,104 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue(json.loads(result.stdout)["noop"])
         self.assertEqual(2, subprocess.run(args + ["--apply"], capture_output=True).returncode)
+
+
+    def test_nonfinite_journal_rejected_before_adapter_activity(self):
+        self.adapter.fail_before = "create_issue"
+        with self.assertRaises(RuntimeError):
+            self.apply()
+        original = self.path.read_bytes()
+        for token in ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"]:
+            with self.subTest(token=token):
+                malformed = original.replace(b"{", ('{"probe": [{"value": ' + token + '}],').encode(), 1)
+                self.path.write_bytes(malformed)
+                calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+                with self.assertRaisesRegex(PublicationError, "Non-finite JSON number"):
+                    self.apply()
+                self.assertEqual(calls, self.adapter.calls)
+                self.assertEqual(reads, self.adapter.reads)
+                self.assertEqual(malformed, self.path.read_bytes())
+        self.path.write_bytes(original)
+        with self.assertRaises(UncertainAction):
+            self.apply()
+        self.adapter.create_issue(render_issue(self.specs[0]))
+        self.assertTrue(self.apply()["noop"])
+        self.assertEqual(5, len(self.adapter.calls))
+        self.assertEqual(0, self.apply()["mutations"])
+        self.assertEqual(5, len(self.adapter.calls))
+
+    def test_nonfinite_cli_inputs_rejected_without_output_or_writes(self):
+        self.apply()
+        originals = {
+            "inventory": json.dumps(self.adapter.inventory()),
+            "publication": json.dumps({"repository_url": REPO, "issue_urls": {}}),
+            "backlog": json.dumps({"program": self.specs[0],
+                "epics": [{**self.specs[1], "work_packages": [self.specs[2]]}]}),
+        }
+        files = {key: Path(self.temp.name) / (key + ".json") for key in originals}
+        args = [sys.executable, str(ROOT / "scripts/publish_plan.py")]
+        for key, path in files.items():
+            args += ["--" + key, str(path)]
+            path.write_text(originals[key], encoding="utf-8")
+        for key, path in files.items():
+            for token in ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"]:
+                with self.subTest(input=key, token=token):
+                    path.write_text(originals[key].replace("{", '{"probe": [{"value": ' + token + '}],', 1), encoding="utf-8")
+                    saved = {p.name: p.read_bytes() for p in Path(self.temp.name).iterdir()}
+                    result = subprocess.run(args, capture_output=True, text=True)
+                    self.assertEqual(2, result.returncode)
+                    self.assertIn("Non-finite JSON number", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual("", result.stdout)
+                    self.assertEqual(saved, {p.name: p.read_bytes() for p in Path(self.temp.name).iterdir()})
+                    path.write_text(originals[key], encoding="utf-8")
+            restored = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(0, restored.returncode, restored.stderr)
+            self.assertTrue(json.loads(restored.stdout)["noop"])
+
+    def test_finite_numbers_and_numeric_strings_remain_valid(self):
+        path = Path(self.temp.name) / "finite.json"
+        data = '{"values": [1.25, -0.0, 1e308, 1e-999, 123456789012345678901234567890, "NaN", "Infinity", "1e999"]}'
+        path.write_text(data, encoding="utf-8")
+        self.assertEqual(json.loads(data), load_publication_json(path))
+
+    def test_cli_rejects_ambiguous_inputs_without_writes_and_recovers(self):
+        self.apply()
+        original = {
+            "inventory": json.dumps(self.adapter.inventory()),
+            "publication": json.dumps({"repository_url": REPO, "issue_urls": {}}),
+            "backlog": json.dumps({"program": self.specs[0],
+                "epics": [{**self.specs[1], "work_packages": [self.specs[2]]}]}),
+        }
+        files = {key: Path(self.temp.name) / (key + ".json") for key in original}
+        args = [sys.executable, str(ROOT / "scripts/publish_plan.py")]
+        for key, path in files.items():
+            args += ["--" + key, str(path)]
+        cases = [
+            ("inventory", '"id": 1001', '"id": 9999, "id": 1001'),
+            ("publication", "{", '{"repository_url": "https://github.com/synthetic/other",'),
+            ("backlog", '"parent": "LB"', '"parent": "LB-99", "parent": "LB"'),
+            ("inventory", "{", r'{"st\u0061te": "closed",'),
+        ]
+        calls = copy.deepcopy(self.adapter.calls)
+        for key, before, after in cases:
+            with self.subTest(input=key, member=after):
+                for name, path in files.items():
+                    path.write_text(original[name], encoding="utf-8")
+                self.assertIn(before, original[key])
+                files[key].write_text(original[key].replace(before, after, 1), encoding="utf-8")
+                saved = {path.name: path.read_bytes() for path in Path(self.temp.name).iterdir()}
+                result = subprocess.run(args, capture_output=True, text=True)
+                self.assertEqual(2, result.returncode, result.stdout)
+                self.assertIn("Duplicate JSON object member", result.stderr)
+                self.assertEqual("", result.stdout)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(saved, {path.name: path.read_bytes() for path in Path(self.temp.name).iterdir()})
+                files[key].write_text(original[key], encoding="utf-8")
+                restored = subprocess.run(args, capture_output=True, text=True)
+                self.assertEqual(0, restored.returncode, restored.stderr)
+                self.assertTrue(json.loads(restored.stdout)["noop"])
+                self.assertEqual(calls, self.adapter.calls)
 
 
 if __name__ == "__main__":
