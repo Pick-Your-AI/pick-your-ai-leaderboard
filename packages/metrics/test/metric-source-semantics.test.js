@@ -1140,7 +1140,7 @@ test("the semantic inventory accounts for all 98 definitions and preserves exact
   // and the literal below is the reviewed ceiling: lower it in the same reviewed change that lowers the
   // fixture field when a deferred metric gains semantic coverage. Raising either needs explicit review.
   assert.ok(
-    inventory.remaining_gap.maximum_deferred_metrics <= 9,
+    inventory.remaining_gap.maximum_deferred_metrics <= 8,
     "The reviewed ceiling on deferred metrics may only be lowered",
   );
   assert.equal(
