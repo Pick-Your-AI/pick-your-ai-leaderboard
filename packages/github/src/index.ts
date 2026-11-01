@@ -190,11 +190,14 @@ export function nextRestLink(linkHeader: string | null | undefined): string | un
     const target = targetPart?.trim().match(/^<([^>]*)>$/)?.[1];
     if (target === undefined) continue;
     for (const parameter of parameters) {
+      // The first rel assignment is authoritative, including if it is malformed.
+      if (!/^\s*rel\s*=/i.test(parameter)) continue;
       const rel = parameter.match(/^\s*rel\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s;"]+))\s*$/i);
-      if (!rel) continue;
-      const value = (rel[1] ?? rel[2] ?? "").replace(/\\(.)/g, "$1");
-      if (value.split(/[ \t]+/).includes("next")) return target;
-      // RFC 8288 uses the first rel parameter; later duplicates do not override it.
+      if (!rel) break;
+      // Quoted-pair escapes are valid only inside a quoted-string, not bare tokens.
+      const value = rel[1] === undefined ? (rel[2] ?? "") : rel[1].replace(/\\(.)/g, "$1");
+      // Registered relation names are case-insensitive; RFC 8288 uses SP, not HTAB.
+      if (value.split(/ +/).some((relation) => relation.toLowerCase() === "next")) return target;
       break;
     }
   }
