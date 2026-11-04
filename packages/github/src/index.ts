@@ -189,17 +189,24 @@ export function nextRestLink(linkHeader: string | null | undefined): string | un
     const [targetPart, ...parameters] = splitLinkParts(entry, ";");
     const target = targetPart?.trim().match(/^<([^>]*)>$/)?.[1];
     if (target === undefined) continue;
+    let foundRel = false;
+    let matchesNext = false;
+    let hasAnchor = false;
     for (const parameter of parameters) {
-      // The first rel assignment is authoritative, including if it is malformed.
-      if (!/^\s*rel\s*=/i.test(parameter)) continue;
+      // Anchor changes the link context. Without validating that context,
+      // never follow it for pagination, regardless of parameter order.
+      if (/^\s*anchor\s*(?:=|$)/i.test(parameter)) hasAnchor = true;
+      // The first rel assignment is authoritative, including when malformed.
+      if (foundRel || !/^\s*rel\s*=/i.test(parameter)) continue;
+      foundRel = true;
       const rel = parameter.match(/^\s*rel\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s;"]+))\s*$/i);
-      if (!rel) break;
+      if (!rel) continue;
       // Quoted-pair escapes are valid only inside a quoted-string, not bare tokens.
       const value = rel[1] === undefined ? (rel[2] ?? "") : rel[1].replace(/\\(.)/g, "$1");
       // Registered relation names are case-insensitive; RFC 8288 uses SP, not HTAB.
-      if (value.split(/ +/).some((relation) => relation.toLowerCase() === "next")) return target;
-      break;
+      matchesNext = value.split(/ +/).some((relation) => relation.toLowerCase() === "next");
     }
+    if (matchesNext && !hasAnchor) return target;
   }
   return undefined;
 }

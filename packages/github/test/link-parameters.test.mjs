@@ -43,9 +43,35 @@ for (const [name, value, expected] of [
     NEXT,
   ],
   ["complete link before an unfinished URI", `<${NEXT}>; rel=next, <${ORIGIN}/unfinished`, NEXT],
+  ["anchor after rel is not the page context", `<${ORIGIN}/repos/other/issues?page=2>; rel=next; anchor="${ORIGIN}/repos/other/issues"`, undefined],
+  ["anchor before rel is not the page context", `<${ORIGIN}/repos/other/issues?page=2>; anchor="${ORIGIN}/repos/other/issues"; rel=next`, undefined],
+  ["quoted anchor with delimiters is still an anchor", `<${NEXT}>; rel=next; anchor="${ORIGIN}/other,with;delimiters"`, undefined],
+  ["anchored first link falls back to unanchored second", `<${ORIGIN}/repos/other/issues?page=2>; rel=next; anchor="${ORIGIN}/repos/other/issues", <${NEXT}>; rel=next`, NEXT],
+  ["anchor before rel also falls back to next link", `<${ORIGIN}/repos/other/issues?page=2>; anchor="${ORIGIN}/repos/other/issues"; rel=next, <${NEXT}>; rel=next`, NEXT],
+  ["title-only anchor string is not a link anchor", `<${NEXT}>; title="anchor=${ORIGIN}/other"; rel=next`, NEXT],
+  ["anchor text inside URI reference is not a parameter", `<${NEXT}&anchor=literal>; rel=next`, `${NEXT}&anchor=literal`],
+  ["invalid bare anchor is conservatively rejected", `<${NEXT}>; rel=next; anchor`, undefined],
+  ["similarly named extension parameter is not anchor", `<${NEXT}>; rel=next; anchor_meta=value`, NEXT],
 ]) {
   test(`REST Link parameters: ${name}`, () => assert.equal(nextRestLink(value), expected));
 }
+
+test("stateless pagination rejects same-origin anchored next and follows an independent unanchored link", async () => {
+  const wrong = `${ORIGIN}/repos/other/issues?page=2`;
+  const calls = [];
+  const items = await paginateRest(
+    options.url,
+    async (url) => {
+      calls.push(url);
+      return url === options.url
+        ? { items: [1], link: `<${wrong}>; rel=next; anchor="${ORIGIN}/repos/other/issues", <${NEXT}>; rel=next` }
+        : { items: [2] };
+    },
+    { apiOrigin: ORIGIN, maxPages: 3 },
+  );
+  assert.deepEqual(items, [1, 2]);
+  assert.deepEqual(calls, [options.url, NEXT]);
+});
 
 test("stateless REST pagination follows the real relation after quoted title text", async () => {
   const calls = [];

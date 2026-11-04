@@ -155,3 +155,7 @@ The synthetic `link-parameters.test.mjs` cases cover both pagination helpers,
 interrupted filesystem checkpoint recovery, cached 304 refresh, and the existing
 cross-origin rejection. They establish parser behavior, not installed-source
 completeness or authorization.
+An explicit `anchor` parameter changes link context; unless its context is
+validated, the parser rejects that individual link-value, even if `rel=next`
+appears before `anchor`. An independent, unanchored `next` link-value can
+still be followed under the existing same-origin restriction.
