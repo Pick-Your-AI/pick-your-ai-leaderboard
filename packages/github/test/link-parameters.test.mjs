@@ -43,13 +43,37 @@ for (const [name, value, expected] of [
     NEXT,
   ],
   ["complete link before an unfinished URI", `<${NEXT}>; rel=next, <${ORIGIN}/unfinished`, NEXT],
-  ["anchor after rel is not the page context", `<${ORIGIN}/repos/other/issues?page=2>; rel=next; anchor="${ORIGIN}/repos/other/issues"`, undefined],
-  ["anchor before rel is not the page context", `<${ORIGIN}/repos/other/issues?page=2>; anchor="${ORIGIN}/repos/other/issues"; rel=next`, undefined],
-  ["quoted anchor with delimiters is still an anchor", `<${NEXT}>; rel=next; anchor="${ORIGIN}/other,with;delimiters"`, undefined],
-  ["anchored first link falls back to unanchored second", `<${ORIGIN}/repos/other/issues?page=2>; rel=next; anchor="${ORIGIN}/repos/other/issues", <${NEXT}>; rel=next`, NEXT],
-  ["anchor before rel also falls back to next link", `<${ORIGIN}/repos/other/issues?page=2>; anchor="${ORIGIN}/repos/other/issues"; rel=next, <${NEXT}>; rel=next`, NEXT],
+  [
+    "anchor after rel is not the page context",
+    `<${ORIGIN}/repos/other/issues?page=2>; rel=next; anchor="${ORIGIN}/repos/other/issues"`,
+    undefined,
+  ],
+  [
+    "anchor before rel is not the page context",
+    `<${ORIGIN}/repos/other/issues?page=2>; anchor="${ORIGIN}/repos/other/issues"; rel=next`,
+    undefined,
+  ],
+  [
+    "quoted anchor with delimiters is still an anchor",
+    `<${NEXT}>; rel=next; anchor="${ORIGIN}/other,with;delimiters"`,
+    undefined,
+  ],
+  [
+    "anchored first link falls back to unanchored second",
+    `<${ORIGIN}/repos/other/issues?page=2>; rel=next; anchor="${ORIGIN}/repos/other/issues", <${NEXT}>; rel=next`,
+    NEXT,
+  ],
+  [
+    "anchor before rel also falls back to next link",
+    `<${ORIGIN}/repos/other/issues?page=2>; anchor="${ORIGIN}/repos/other/issues"; rel=next, <${NEXT}>; rel=next`,
+    NEXT,
+  ],
   ["title-only anchor string is not a link anchor", `<${NEXT}>; title="anchor=${ORIGIN}/other"; rel=next`, NEXT],
-  ["anchor text inside URI reference is not a parameter", `<${NEXT}&anchor=literal>; rel=next`, `${NEXT}&anchor=literal`],
+  [
+    "anchor text inside URI reference is not a parameter",
+    `<${NEXT}&anchor=literal>; rel=next`,
+    `${NEXT}&anchor=literal`,
+  ],
   ["invalid bare anchor is conservatively rejected", `<${NEXT}>; rel=next; anchor`, undefined],
   ["similarly named extension parameter is not anchor", `<${NEXT}>; rel=next; anchor_meta=value`, NEXT],
 ]) {
