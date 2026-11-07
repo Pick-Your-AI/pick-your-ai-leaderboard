@@ -1,7 +1,7 @@
 {
   "worktree": {
     "setup": [
-      "npm ci"
+      "npm exec --yes --package=npm@12.2.0 -- npm ci"
     ],
     "teardown": "echo \"Setup starts no persistent services; Paseo handles worktree removal.\""
   },
@@ -10,16 +10,16 @@
       "command": "git diff --check"
     },
     "test": {
-      "command": "npm run test"
+      "command": "npm exec --yes --package=npm@12.2.0 -- npm run test"
     },
     "build": {
-      "command": "npm run build"
+      "command": "npm exec --yes --package=npm@12.2.0 -- npm run build"
     },
     "typecheck": {
-      "command": "npm run typecheck"
+      "command": "npm exec --yes --package=npm@12.2.0 -- npm run typecheck"
     },
     "format-check": {
-      "command": "npm run format:check"
+      "command": "npm exec --yes --package=npm@12.2.0 -- npm run format:check"
     }
   }
 }
