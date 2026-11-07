@@ -21,7 +21,7 @@
   "dependencies": {
     "@pick-your-ai/contracts": "0.1.0",
     "@pick-your-ai/metrics": "0.1.0",
-    "fastify": "5.12.7"
+    "fastify": "5.12.8"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
