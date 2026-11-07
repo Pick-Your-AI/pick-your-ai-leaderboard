@@ -17,7 +17,7 @@
     "@pick-your-ai/contracts": "0.1.0",
     "@pick-your-ai/metrics": "0.1.0",
     "@pick-your-ai/service": "0.1.0",
-    "@vitejs/plugin-react": "6.1.2",
+    "@vitejs/plugin-react": "6.2.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "vite": "8.3.5"
