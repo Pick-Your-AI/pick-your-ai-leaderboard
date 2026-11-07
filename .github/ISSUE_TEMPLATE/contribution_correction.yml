@@ -42,3 +42,11 @@ body:
       is needed. A public issue does not authorize a data or identity mutation.
   validations:
     required: true
+- type: textarea
+  id: routing_context
+  attributes:
+    label: Routing context (optional)
+    description: Only for an unresolved decision. Reuse answers above; do not include private rosters or security details. See CONTRIBUTING.md, Routing decisions.
+    placeholder: "Decision needed; current responsible role; prior disposition; proposed next recipient."
+  validations:
+    required: false

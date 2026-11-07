@@ -11,3 +11,13 @@ Read CONTRIBUTING.md, docs/DELIVERY_PLAN.md and the issue's acceptance gate befo
 - Research and imported builder contracts remain owned by the research repository. The leaderboard owns separate versioned contracts. Source collection must not mutate upstream issue or Project state.
 - Runtime scaffold, GitHub App installation, hosting and deployment each have their own acceptance work. A planning CI pass is not a claim that the app exists or is live.
 - Inherit machine-wide safety rules: never shut down or terminate WSL to recover this project. Preserve unrelated sessions and workloads.
+
+## Decisions and escalation
+
+For unresolved decisions, follow [CONTRIBUTING.md#routing-decisions](CONTRIBUTING.md#routing-decisions)
+and the [canonical escalation guide](https://github.com/Pick-Your-AI/.github/blob/main/docs/governance/ESCALATION.md).
+Refresh private routing evidence before choosing a recipient. Report unresolved
+roles and failed or stale lookups explicitly; do not infer accepted ownership from
+membership or access. Preserve the existing assignee, local gates and private-reporting
+boundaries. Central links depend on the governance change merging; no automatic
+routing, permission change or recurring job is enabled by these instructions.

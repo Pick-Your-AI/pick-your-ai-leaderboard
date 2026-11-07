@@ -21,3 +21,13 @@ Link public source documentation or the exact synthetic fixture for changed assu
 ## Review routing
 
 Name the affected metric, ingestion, UI, security or operations review role and the existing designated owner/review rule, where configured. Do not infer a person from a proposed plan role. Policy changes need designated review before activation; a passing test or PR alone is not production policy approval.
+
+## Routing context (optional)
+
+<!-- Only for an unresolved decision; reuse information above. See CONTRIBUTING.md,
+Routing decisions. Keep private rosters and security details out of this template. -->
+
+- Decision needed:
+- Current responsible role:
+- Prior disposition:
+- Proposed next recipient:
