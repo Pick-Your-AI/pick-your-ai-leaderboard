@@ -53,6 +53,11 @@ python -m unittest discover -s tests -p test_publish_plan.py -v
 
 The CLI only reads local files and writes a plan to stdout. `--backlog` and
 `--publication` can select reviewed alternate input files. There is no `--apply`.
+All three input files reject non-finite numbers (including overflowing exponents)
+and require unique decoded JSON object member names, including
+equivalent escaped spellings. Contradictory plans, repository bindings and
+inventory identities stop the CLI before it emits a reconciliation report.
+
 The versioned receipt intentionally omits issue bodies and is not an inventory
 input. Do not reconstruct bodies from hashes or present reconstructed data as a
 live read. Raw reads should remain in temporary/private working storage.
@@ -157,7 +162,11 @@ Duplicate/malformed/unknown markers, a planned title whose marker disappeared,
 changed or missing recorded identity, incomplete pagination, unknown native
 parents, parent conflicts, receipt corruption and plan drift all fail closed.
 Pending intents must have exactly their operation's defined fields; extra fields
-cannot suppress an uncertain operation. Clearing a parent intent requires positive
+cannot suppress an uncertain operation. Journal JSON rejects non-finite numbers
+(including overflowing exponents). Objects require unique
+decoded member names at every depth, including equivalent escaped spellings. Ambiguous pending intents or identity
+bindings are rejected before adapter reads or mutations, retaining the journal
+bytes for explicit reconciliation. Clearing a parent intent requires positive
 native-edge readback. Supplied and durable issue numbers and immutable IDs must
 agree before their constraints are combined.
 Resolve the underlying ambiguity explicitly; the publisher never guesses a

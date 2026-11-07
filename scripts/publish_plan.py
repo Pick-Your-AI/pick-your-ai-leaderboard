@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -241,6 +242,32 @@ class Adapter(Protocol):
     def attach_parent(self, child_number: int, parent_number: int, *, replace: bool) -> None: ...
 
 
+def unique_publication_object(pairs):
+    """Reject ambiguity before a member can overwrite publication inputs."""
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise PublicationError("Duplicate JSON object member in publication input")
+        value[key] = item
+    return value
+
+
+def reject_nonfinite_number(token):
+    raise PublicationError("Non-finite JSON number")
+
+
+def finite_json_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        reject_nonfinite_number(token)
+    return value
+
+
+def load_publication_json(path):
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_publication_object,
+                      parse_constant=reject_nonfinite_number, parse_float=finite_json_float)
+
+
 class Journal:
     """Atomic, fsynced local receipts plus an OS lock released after a crash."""
     def __init__(self, path, repo, specs):
@@ -253,7 +280,7 @@ class Journal:
             return {"schema_version": 1, "repository_url": self.repo,
                     "plan_sha256": self.plan_hash, "bindings": {}, "pending": None}
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = load_publication_json(self.path)
             if (data["schema_version"] != 1 or data["repository_url"] != self.repo or
                     data["plan_sha256"] != self.plan_hash or not isinstance(data["bindings"], dict) or
                     not (data["pending"] is None or isinstance(data["pending"], dict))):
@@ -423,11 +450,11 @@ def main():
     parser.add_argument("--publication", type=Path, default=ROOT / "docs/PUBLICATION.json")
     args = parser.parse_args()
     try:
-        backlog = json.loads(args.backlog.read_text())
-        publication = json.loads(args.publication.read_text())
+        backlog = load_publication_json(args.backlog)
+        publication = load_publication_json(args.publication)
         specs = specs_from_backlog(backlog)
         repo = repository(publication["repository_url"])
-        report = reconcile(specs, json.loads(args.inventory.read_text()), repo,
+        report = reconcile(specs, load_publication_json(args.inventory), repo,
                            publication_bindings(publication, specs, repo))
         print(json.dumps({"mode": "read-only dry run", **report}, indent=2, sort_keys=True))
     except (OSError, ValueError, KeyError, TypeError) as error:
