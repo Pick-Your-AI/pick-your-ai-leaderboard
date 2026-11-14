@@ -145,3 +145,17 @@ preserves the later retained values without summing them, taking a minimum or
 manufacturing global consumption. Unobserved clients, resources and secondary
 quota balances remain unknown. Freshness, queue recovery and confirmed
 publication diagnostics are separate from this observation.
+
+REST Link parsing respects commas and semicolons inside URI references and
+quoted parameter values, including escaped quotes and backslashes. Only the
+first actual `rel` parameter supplies pagination; text inside a title cannot
+supply a relation. This follows the parameter boundaries in
+[RFC 8288 sections 3 and 3.3](https://www.rfc-editor.org/rfc/rfc8288.html#section-3).
+The synthetic `link-parameters.test.mjs` cases cover both pagination helpers,
+interrupted filesystem checkpoint recovery, cached 304 refresh, and the existing
+cross-origin rejection. They establish parser behavior, not installed-source
+completeness or authorization.
+An explicit `anchor` parameter changes link context; unless its context is
+validated, the parser rejects that individual link-value, even if `rel=next`
+appears before `anchor`. An independent, unanchored `next` link-value can
+still be followed under the existing same-origin restriction.
