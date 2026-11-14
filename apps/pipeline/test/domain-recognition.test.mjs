@@ -1712,6 +1712,7 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
 });
 
 test("accepted documentation retains bounded domain reasons through primary and portfolio API reads", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(cutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const s = scenario("documentation");
   // Exercise the real-mode boundary with explicitly fictional marker-free
@@ -1782,6 +1783,7 @@ test("accepted documentation retains bounded domain reasons through primary and 
 });
 
 test("data_quality: correction provenance stays private and obsolete generic authority is withheld after database reopen", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(cutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = scenario("data_quality");
@@ -1894,6 +1896,7 @@ test("data_quality: correction provenance stays private and obsolete generic aut
 });
 
 test("reproductions: persisted accepted outcomes keep private proof bounded and retire obsolete authority across reopen", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(cutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = scenario("reproductions");

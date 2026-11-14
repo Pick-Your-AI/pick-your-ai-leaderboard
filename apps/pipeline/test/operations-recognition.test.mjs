@@ -1059,6 +1059,7 @@ const operationsConfigurationHash = (value) =>
   createHash("sha256").update(operationsCanonicalConfiguration(value)).digest("hex");
 
 test("operations deployment ID authority: retained SQL publication is withheld after reopen and undefined refresh", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(cutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = scenario("deployment_work");
@@ -1208,6 +1209,7 @@ test("operations deployment ID authority: retained SQL publication is withheld a
     "private-deployment-repaired",
   ];
   h.options.config.version = "configuration-deployment-repaired-v2";
+  t.mock.timers.tick(1);
   h.duplicate();
   retained = s.input;
   let receiptCalls = 0;

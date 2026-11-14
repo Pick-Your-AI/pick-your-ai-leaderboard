@@ -376,6 +376,7 @@ test("authored notes authority: valid first binding cannot hide a later malforme
 });
 
 test("authored notes publication: current and pinned purposes survive real store reopen and retire obsolete authority", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(notesCutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const { projectRead } = await import("../../service/dist/public-source.js");
