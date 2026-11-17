@@ -24,6 +24,15 @@ import {
   notesCutoff,
 } from "../../../tests/fixtures/authored-release-notes.mjs";
 
+// Keep the separate observation clock inside the positive fixture receipt's validity window.
+const fixtureObservationTime = "2026-10-30T12:00:00.000Z";
+const fixtureClock = (t) => ({
+  now: () => {
+    t.mock.timers.tick(1);
+    return new Date().toISOString();
+  },
+});
+
 test("authored notes review: current exact source/detail/reference approval adds only the fixed purpose", () => {
   const s = scenario(),
     original = structuredClone(s.input);
@@ -376,6 +385,7 @@ test("authored notes authority: valid first binding cannot hide a later malforme
 });
 
 test("authored notes publication: current and pinned purposes survive real store reopen and retire obsolete authority", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(fixtureObservationTime) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const { projectRead } = await import("../../service/dist/public-source.js");
@@ -383,6 +393,7 @@ test("authored notes publication: current and pinned purposes survive real store
   const h = await harness(t, {
     markerFreeConfig: true,
     dataMode: "public",
+    ...fixtureClock(t),
     payloads: [s.envelope.payload.pull_request],
     normalizerFactory:
       () =>
