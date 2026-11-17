@@ -626,7 +626,8 @@ class PublicationTests(unittest.TestCase):
         wrong["epics"][0]["parent"] = "LB-01.01"
         with self.assertRaisesRegex(PublicationError, "containing program"):
             specs_from_backlog(wrong)
-        self.assertEqual(self.specs, specs_from_backlog(backlog))
+        self.assertEqual([backlog["program"], backlog["epics"][0],
+                          backlog["epics"][0]["work_packages"][0]], specs_from_backlog(backlog))
         self.assertEqual([], self.adapter.calls)
 
     def test_journal_requires_integer_schema_version_before_adapter_reads(self):
