@@ -26,6 +26,14 @@ const before = "b".repeat(40),
 const occurredAt = "2026-10-07T10:00:00.000Z";
 const acceptedAt = "2026-10-09T10:00:00.000Z",
   cutoff = "2026-10-10T10:00:00.000Z";
+// Keep the separate observation clock inside the positive fixture receipt's validity window.
+const fixtureObservationTime = "2026-10-30T12:00:00.000Z";
+const fixtureClock = (t) => ({
+  now: () => {
+    t.mock.timers.tick(1);
+    return new Date().toISOString();
+  },
+});
 
 function source(change = () => {}) {
   const envelope = {
@@ -420,6 +428,7 @@ const canonical = (value) =>
 const configurationHash = (value) => createHash("sha256").update(canonical(value)).digest("hex");
 
 test("legacy sparse-list publication retires after reopen and undefined refresh, then dense repair succeeds", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(fixtureObservationTime) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = scenario("market_research");
@@ -446,6 +455,7 @@ test("legacy sparse-list publication retires after reopen and undefined refresh,
   const h = await harness(t, {
     markerFreeConfig: true,
     dataMode: "public",
+    ...fixtureClock(t),
     payloads: [payload],
     defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => {
