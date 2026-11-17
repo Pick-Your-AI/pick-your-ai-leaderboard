@@ -22,3 +22,11 @@ body:
     attributes:
       label: Affected mappings and decisions
       description: Identify consequences for existing tasks, release gates or metric policy.
+  - type: textarea
+    id: routing_context
+    attributes:
+      label: Routing context (optional)
+      description: Only for an unresolved decision. Reuse answers above; do not include private rosters or security details. See CONTRIBUTING.md, Routing decisions.
+      placeholder: "Decision needed; current responsible role; prior disposition; proposed next recipient."
+    validations:
+      required: false

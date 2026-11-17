@@ -1,10 +1,11 @@
 import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
-import { parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
+import { compareSourceInstants, parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
 import { validateRelationshipPairCapture } from "./relationship-pair-authority.mjs";
 import { captureMergeTargetAuthorization } from "./pull-request-merge-target.mjs";
+import { decisionGenerationAuthorization, parseDecisionGenerationCapture } from "./pull-request-decision-history.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
 // Records have the retained snapshot's lifecycle, never the optional preview TTL.
@@ -282,6 +283,18 @@ function validateAudit(rows, audit, aggregation, evidenceClass) {
 
 export function buildAggregateExplanation(capture, binding) {
   const { input, policies, aggregates, authorization, snapshot, scope } = capture;
+  const decision = decisionGenerationAuthorization(authorization);
+  if (decision.pullRequestDecisionEvidence !== undefined) {
+    const retained = decision.pullRequestDecisionEvidence;
+    check(
+      retained.observationCutoff === input.cutoff &&
+        retained.runs.every((run) =>
+          authorization.sources.some(
+            (source) => source.repositoryId === String(run.repositoryId) && source.generation === run.accessGeneration,
+          ),
+        ),
+    );
+  }
   const canonicalScope = {
     ...scope,
     repos: sorted(scope.repos),
@@ -310,7 +323,7 @@ export function buildAggregateExplanation(capture, binding) {
     const facts = new Map();
     for (const fact of allFacts) {
       if (
-        Date.parse(fact.observedAt) > Date.parse(input.cutoff) ||
+        compareSourceInstants(fact.observedAt, input.cutoff) > 0 ||
         (fact.revision > 0 && !fact.correctionReceipt?.trim())
       )
         continue;
@@ -394,6 +407,7 @@ export function buildAggregateExplanation(capture, binding) {
             relationshipPairEvidence: validateRelationshipPairCapture(authorization.relationshipPairEvidence),
           }),
       ...captureMergeTargetAuthorization(authorization),
+      ...decision,
       ...reversionAuthorization(authorization),
       sources: authorization.sources.map((source) => ({
         repositoryId: token(source.repositoryId),
@@ -408,7 +422,7 @@ export function buildAggregateExplanation(capture, binding) {
             fact.revision > 0 &&
             fact.correctionReceipt?.trim() &&
             fact.state === "excluded" &&
-            Date.parse(fact.observedAt) <= Date.parse(input.cutoff) &&
+            compareSourceInstants(fact.observedAt, input.cutoff) <= 0 &&
             metrics.some(
               (metric) =>
                 metric.metricId === fact.metricId &&
@@ -454,6 +468,11 @@ export class AggregateExplanationStore {
     try {
       check(Buffer.byteLength(row.document) <= aggregateExplanationLimitsV1.bytes);
       const document = JSON.parse(row.document);
+      const decision =
+        document.authorization?.pullRequestDecisionEvidence === undefined
+          ? null
+          : parseDecisionGenerationCapture(document.authorization.pullRequestDecisionEvidence);
+      if (decision !== null) document.authorization.pullRequestDecisionEvidence = decision;
       check(
         document.schemaVersion === aggregateExplanationLimitsV1.schemaVersion &&
           document.snapshot.snapshotId === snapshotId &&
@@ -461,6 +480,17 @@ export class AggregateExplanationStore {
       );
       check(document.computationVersion === aggregateExplanationLimitsV1.computationVersion);
       reversionAuthorization(document.authorization);
+      if (decision !== null) {
+        check(
+          decision.observationCutoff === document.cutoff &&
+            decision.runs.every((run) =>
+              document.authorization.sources.some(
+                (source) =>
+                  source.repositoryId === String(run.repositoryId) && source.generation === run.accessGeneration,
+              ),
+            ),
+        );
+      }
       if (document.authorization.discussionFeedbackEvidence !== undefined) {
         const capture = parseDiscussionFeedbackCapture(document.authorization.discussionFeedbackEvidence);
         check(
