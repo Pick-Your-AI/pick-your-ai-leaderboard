@@ -610,6 +610,85 @@ class PublicationTests(unittest.TestCase):
                 self.assertTrue(json.loads(restored.stdout)["noop"])
                 self.assertEqual(calls, self.adapter.calls)
 
+    def test_nested_backlog_rejects_wrong_existing_parent_and_wrong_container(self):
+        backlog = {"program": copy.deepcopy(self.specs[0]), "epics": [
+            {**copy.deepcopy(self.specs[1]), "work_packages": [copy.deepcopy(self.specs[2])]}]}
+        wrong = copy.deepcopy(backlog)
+        wrong["epics"][0]["work_packages"][0]["parent"] = "LB"
+        with self.assertRaisesRegex(PublicationError, "containing epic"):
+            specs_from_backlog(wrong)
+        wrong = copy.deepcopy(backlog)
+        wrong["epics"][0]["work_packages"][0]["id"] = "LB-02.01"
+        wrong["epics"][0]["work_packages"][0]["parent"] = "LB-01"
+        with self.assertRaisesRegex(PublicationError, "plan parent"):
+            specs_from_backlog(wrong)
+        wrong = copy.deepcopy(backlog)
+        wrong["epics"][0]["parent"] = "LB-01.01"
+        with self.assertRaisesRegex(PublicationError, "containing program"):
+            specs_from_backlog(wrong)
+        self.assertEqual(self.specs, specs_from_backlog(backlog))
+        self.assertEqual([], self.adapter.calls)
+
+    def test_journal_requires_integer_schema_version_before_adapter_reads(self):
+        self.apply(max_mutations=1)
+        saved = self.path.read_bytes()
+        for invalid_version in [True, 1.0, False, "1", None]:
+            with self.subTest(invalid_version=invalid_version):
+                state = json.loads(saved)
+                state["schema_version"] = invalid_version
+                self.path.write_text(json.dumps(state))
+                modified = self.path.read_bytes()
+                calls, reads = copy.deepcopy(self.adapter.calls), self.adapter.reads
+                with self.assertRaisesRegex(PublicationError, "Receipt scope or plan changed"):
+                    self.apply()
+                self.assertEqual(calls, self.adapter.calls)
+                self.assertEqual(reads, self.adapter.reads)
+                self.assertEqual(modified, self.path.read_bytes())
+        self.path.write_bytes(saved)
+        self.assertTrue(self.apply()["noop"])
+        self.assertEqual(5, len(self.adapter.calls))
+
+    def test_cli_rejects_wrong_nested_parent_and_nonobject_inventory(self):
+        self.apply()
+        files = {name: Path(self.temp.name) / (name + ".json")
+                 for name in ("inventory", "publication", "backlog")}
+        baseline = {
+            "inventory": self.adapter.inventory(),
+            "publication": {"repository_url": REPO, "issue_urls": {}},
+            "backlog": {"program": self.specs[0],
+                        "epics": [{**self.specs[1], "work_packages": [self.specs[2]]}]},
+        }
+        args = [sys.executable, str(ROOT / "scripts/publish_plan.py")]
+        for name, path in files.items():
+            args.extend(["--" + name, str(path)])
+        invalid = [
+            ("backlog", {"program": self.specs[0],
+                         "epics": [{**self.specs[1], "work_packages":
+                                    [{**self.specs[2], "parent": "LB"}]}]}),
+            ("inventory", []),
+            ("inventory", {**baseline["inventory"], "pages": [None]}),
+            ("inventory", {**baseline["inventory"], "pages":
+                           [{**baseline["inventory"]["pages"][0], "issues": [None]}]}),
+        ]
+        for name, bad in invalid:
+            with self.subTest(name=name, bad=type(bad).__name__):
+                for file_name, path in files.items():
+                    path.write_text(json.dumps(baseline[file_name]))
+                files[name].write_text(json.dumps(bad))
+                before = {file_name: path.read_bytes() for file_name, path in files.items()}
+                result = subprocess.run(args, capture_output=True, text=True)
+                self.assertEqual(2, result.returncode, result.stderr)
+                self.assertEqual("", result.stdout)
+                self.assertIn("Publication stopped:", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(before, {file_name: path.read_bytes() for file_name, path in files.items()})
+                self.assertEqual(5, len(self.adapter.calls))
+        for name, path in files.items():
+            path.write_text(json.dumps(baseline[name]))
+        valid = subprocess.run(args, capture_output=True, text=True)
+        self.assertEqual(0, valid.returncode, valid.stderr)
+        self.assertTrue(json.loads(valid.stdout)["noop"])
+
 
 if __name__ == "__main__":
     unittest.main()
