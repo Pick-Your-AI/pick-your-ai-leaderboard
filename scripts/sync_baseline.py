@@ -7,11 +7,17 @@ import hashlib
 import json
 import pathlib
 
+from validate_plan import load_json as strict_load_json
+
 ROOT = pathlib.Path(__file__).resolve().parents[1] / "planning"
 
 
 def load(name):
-    return json.loads((ROOT / name).read_text(encoding="utf-8"))
+    path = ROOT / name
+    try:
+        return strict_load_json(path)
+    except ValueError as exc:
+        raise ValueError(f"{path.name}: {exc}") from exc
 
 
 def write(name, data):
@@ -19,7 +25,14 @@ def write(name, data):
 
 
 def synchronize():
-    backlog = load("project-backlog.json")
+    # Admit every source before calculating or writing any derived file.
+    inputs = {
+        name: load(name) for name in (
+            "project-backlog.json", "metrics-and-ingestion.json",
+            "metric-backlog-coverage.json", "concept.json", "ui/ui-backlog-coverage.json",
+        )
+    }
+    backlog = inputs["project-backlog.json"]
     packages = [w for e in backlog["epics"] for w in e["work_packages"]]
     counts = {
         "programs": 1,
@@ -30,10 +43,9 @@ def synchronize():
         "blocked_by_edges": sum(len(w["blocked_by"]) for w in packages),
     }
     backlog["counts"] = counts
-    write("project-backlog.json", backlog)
-    metrics = load("metrics-and-ingestion.json")
+    metrics = inputs["metrics-and-ingestion.json"]
     catalog = metrics["metrics"]
-    coverage = load("metric-backlog-coverage.json")
+    coverage = inputs["metric-backlog-coverage.json"]
     coverage["summary"].update({
         "catalog_metrics": len(catalog),
         "mapped_metrics": len(coverage["mappings"]),
@@ -41,19 +53,27 @@ def synchronize():
         "backlog_work_packages": len(packages),
         "release_eligibility_counts": dict(collections.Counter(m["release_eligibility"] for m in coverage["mappings"])),
     })
-    write("metric-backlog-coverage.json", coverage)
-    concept = load("concept.json")
+    concept = inputs["concept.json"]
     concept["backlog"] = counts
     concept["metric_catalog"]["total"] = len(catalog)
     concept["metric_catalog"]["families"] = dict(collections.Counter(m["family"] for m in catalog))
-    write("concept.json", concept)
-    ui_map = load("ui/ui-backlog-coverage.json")
+    ui_map = inputs["ui/ui-backlog-coverage.json"]
     ui_map["master_counts"] = counts
-    normalized = (ROOT / "project-backlog.json").read_text(encoding="utf-8").encode("utf-8")
+    normalized = (json.dumps(backlog, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     ui_map["master_sha256"] = hashlib.sha256(normalized).hexdigest()
-    write("ui/ui-backlog-coverage.json", ui_map)
+    outputs = (
+        ("project-backlog.json", backlog),
+        ("metric-backlog-coverage.json", coverage),
+        ("concept.json", concept),
+        ("ui/ui-backlog-coverage.json", ui_map),
+    )
+    for name, data in outputs:
+        write(name, data)
     print("Derived baseline counts and UI fingerprint synchronized. Run validation before committing.")
 
 
 if __name__ == "__main__":
-    synchronize()
+    try:
+        synchronize()
+    except ValueError as exc:
+        raise SystemExit(f"Invalid planning JSON: {exc}") from exc

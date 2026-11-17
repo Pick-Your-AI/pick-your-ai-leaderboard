@@ -861,6 +861,7 @@ test("project configuration: an owner or participant cannot replace independent 
 });
 
 test("project configuration persistence: withdrawal retires actual stored recognition after SQL and SQLite reopen", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(cutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = scenario("workflow configure");

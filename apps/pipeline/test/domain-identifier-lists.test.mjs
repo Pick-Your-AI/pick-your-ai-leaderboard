@@ -420,6 +420,7 @@ const canonical = (value) =>
 const configurationHash = (value) => createHash("sha256").update(canonical(value)).digest("hex");
 
 test("legacy sparse-list publication retires after reopen and undefined refresh, then dense repair succeeds", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(cutoff) });
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = scenario("market_research");
@@ -533,6 +534,7 @@ test("legacy sparse-list publication retires after reopen and undefined refresh,
   // source revision also proves repair re-materializes the actual observed PR,
   // rather than merely reading the retained legacy accepted normalization.
   h.options.config.version = "configuration-repaired-v2";
+  t.mock.timers.tick(1);
   h.duplicate();
   retained = s.input;
   let receiptCalls = 0;
