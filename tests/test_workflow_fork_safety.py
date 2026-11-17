@@ -403,6 +403,22 @@ def workflow_name(text, fallback):
     return fallback
 
 
+def _flow_items(value):
+    """Split a supported inline YAML list without splitting quoted commas."""
+    quoted, unclosed = _quoted(value)
+    # Unsupported, unterminated scalars must not be interpreted as separate
+    # workflow names: the caller already reports YAML syntax failures.
+    if unclosed:
+        return [value]
+    pieces, start = [], 0
+    for index, char in enumerate(value):
+        if char == "," and not quoted[index]:
+            pieces.append(value[start:index])
+            start = index + 1
+    pieces.append(value[start:])
+    return pieces
+
+
 def run_sources(text):
     """Names listed under workflow_run.workflows (and only there)."""
     block = trigger_blocks(text).get("workflow_run", [])
@@ -412,7 +428,7 @@ def run_sources(text):
             continue
         inline = re.fullmatch(r"\[(.*)\]", match.group(1).strip())
         if inline:
-            items = inline.group(1).split(",")
+            items = _flow_items(inline.group(1))
         elif match.group(1).strip():
             items = [match.group(1)]
         else:
@@ -777,7 +793,7 @@ def audit(text, reachable=None):
                 problems.append(f"checkout of untrusted pull-request ref: {ref}")
             elif "github.event.workflow_run" in ref.lower() and not safe_expression and ref.strip("${}'\" ").lower() != "github.event.workflow_run.head_sha":
                 problems.append(f"checkout of unreviewed workflow_run ref: {ref}")
-            elif "workflow_run" in ref.lower() and "workflow_run" not in events:
+            elif safe_expression and "github.event.workflow_run" in ref_value.lower() and "workflow_run" not in events:
                 problems.append(f"workflow_run ref without workflow_run trigger: {ref}")
             elif ("${{" in ref_value or "}}" in ref_value) and not safe_expression:
                 # Match the whole YAML-unwrapped value. Whitespace inside a
@@ -823,6 +839,11 @@ def audit(text, reachable=None):
             problems.append("references a secret other than GITHUB_TOKEN")
             break
     for name, indent, body in jobs(text):
+        job_call = _property(body, indent, "uses")
+        if job_call is not None and not LOCAL_WORKFLOW.fullmatch(job_call.strip("'\"")):
+            # A pinned external reusable workflow still executes source outside
+            # this repository's audit. No reviewed callee means no PR safety proof.
+            problems.append(f"job {name} calls unverified external reusable workflow: {job_call}")
         if _property(body, indent, "secrets") is not None:
             problems.append(f"job {name} passes secrets")
         if _property(body, indent, "environment") is not None:
@@ -1008,6 +1029,41 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         self.rejected(lambda t: t.replace("@3d3c42e5aac5ba805825da76410c181273ba90b1", "@3d3c42e"), "not pinned")
         self.assertEqual(audit(GOOD.replace("jobs:\n", "jobs:\n  local:\n    uses: ./.github/workflows/x.yml\n")), [])
         self.rejected(lambda t: t.replace("jobs:\n", "jobs:\n  remote:\n    uses: org/repo/.github/workflows/x.yml@main\n"), "not pinned")
+
+    def test_unresolved_external_reusable_workflow_fails_closed(self):
+        remote = "outside/other/.github/workflows/ci.yml@" + "a" * 40
+        caller = GOOD.replace("jobs:\n", f"jobs:\n  remote:\n    uses: {remote}\n")
+        self.assertTrue(any("unverified external reusable workflow" in problem
+                            for problem in audit(caller)))
+        self.assertTrue(any("unverified external reusable workflow" in problem
+                            for problem in audit_all({"caller.yml": caller})["caller.yml"]))
+        # A push-only reusable caller is not PR reachable, but its action must
+        # still obey the universal full-SHA pin rule.
+        push = DEPLOY.replace("jobs:\n", f"jobs:\n  remote:\n    uses: {remote}\n")
+        self.assertEqual(audit(push, reachable=False), [])
+
+    def test_workflow_run_names_with_commas_are_not_split_inside_quotes(self):
+        source = GOOD.replace("name: Fixture", "name: Build, verify")
+        follower = DEPLOY.replace(
+            "  push:\n    branches: [main]",
+            "  workflow_run:\n    workflows: ['Build, verify']\n    types: [completed]\n    branches: [main]",
+        )
+        block = follower.replace("workflows: ['Build, verify']",
+                                 "workflows:\n      - 'Build, verify'")
+        for name, text in (("inline", follower), ("block", block)):
+            with self.subTest(form=name):
+                self.assertEqual(run_sources(text), ["Build, verify"])
+                self.assertIn("follow.yml", pr_reachable({"source.yml": source, "follow.yml": text}))
+                self.assertTrue(audit_all({"source.yml": source, "follow.yml": text})["follow.yml"])
+
+    def test_literal_branch_with_workflow_run_in_name_is_not_an_event_ref(self):
+        literal = GOOD.replace(
+            "          persist-credentials: false",
+            "          persist-credentials: false\n          ref: refs/heads/maintenance/workflow_run",
+        )
+        self.assertEqual(audit(literal), [])
+        unsafe = literal.replace("refs/heads/maintenance/workflow_run", "refs/pull/123/merge")
+        self.assertTrue(any("untrusted pull-request ref" in item for item in audit(unsafe)))
 
     def test_rejects_persisted_checkout_credentials_and_untrusted_refs(self):
         self.rejected(lambda t: t.replace("persist-credentials: false", "persist-credentials: true"), "persist-credentials")
