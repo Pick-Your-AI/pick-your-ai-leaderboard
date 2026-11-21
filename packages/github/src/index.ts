@@ -156,19 +156,57 @@ export function readableOutcome(visibility: Visibility | null | undefined): Endp
   return { kind: "readable", visibility: visibility ?? "unknown" };
 }
 
+/** Split delimiters only outside URI references and quoted parameter values. */
+function splitLinkParts(value: string, delimiter: "," | ";"): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let quoted = false;
+  let target = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quoted) {
+      if (character === "\\") index += 1;
+      else if (character === '"') quoted = false;
+    } else if (target) {
+      if (character === ">") target = false;
+    } else if (character === "<") target = true;
+    else if (character === '"') quoted = true;
+    else if (character === delimiter) {
+      parts.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+  // Preserve complete parts, but never reinterpret an unfinished tail.
+  if (quoted || target) return parts;
+  parts.push(value.slice(start));
+  return parts;
+}
+
 /** Parse the `next` relation without trusting the URL it supplies. */
 export function nextRestLink(linkHeader: string | null | undefined): string | undefined {
   if (!linkHeader) return undefined;
-  const entries = linkHeader.match(/(?:<[^>]*>|[^,])+/g) ?? [];
-  for (const rawEntry of entries) {
-    const entry = rawEntry.trim();
-    const match = entry.match(/^<([^>]*)>\s*;(.*)$/);
-    if (!match) continue;
-    const target = match[1];
+  for (const entry of splitLinkParts(linkHeader, ",")) {
+    const [targetPart, ...parameters] = splitLinkParts(entry, ";");
+    const target = targetPart?.trim().match(/^<([^>]*)>$/)?.[1];
     if (target === undefined) continue;
-    const rel = (match[2] ?? "").match(/(?:^|;)\s*rel\s*=\s*(?:"([^"]*)"|([^;\s]+))/i);
-    const relations = (rel?.[1] ?? rel?.[2] ?? "").split(/\s+/);
-    if (relations.includes("next")) return target;
+    let foundRel = false;
+    let matchesNext = false;
+    let hasAnchor = false;
+    for (const parameter of parameters) {
+      // Anchor changes the link context. Without validating that context,
+      // never follow it for pagination, regardless of parameter order.
+      if (/^\s*anchor\s*(?:=|$)/i.test(parameter)) hasAnchor = true;
+      // The first rel assignment is authoritative, including when malformed.
+      if (foundRel || !/^\s*rel\s*=/i.test(parameter)) continue;
+      foundRel = true;
+      const rel = parameter.match(/^\s*rel\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s;"]+))\s*$/i);
+      if (!rel) continue;
+      // Quoted-pair escapes are valid only inside a quoted-string, not bare tokens.
+      const value = rel[1] === undefined ? (rel[2] ?? "") : rel[1].replace(/\\(.)/g, "$1");
+      // Registered relation names are case-insensitive; RFC 8288 uses SP, not HTAB.
+      matchesNext = value.split(/ +/).some((relation) => relation.toLowerCase() === "next");
+    }
+    if (matchesNext && !hasAnchor) return target;
   }
   return undefined;
 }
