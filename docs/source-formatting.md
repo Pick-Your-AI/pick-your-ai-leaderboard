@@ -1,6 +1,6 @@
 # Source formatting
 
-Prettier is pinned to **3.9.10** in the root development dependencies. The version and package integrity were verified against the official npm registry before selection. `.prettierrc.json` uses two-space indentation, semicolons, double quotes, trailing commas, a 120-column target and LF newlines.
+Prettier is pinned to **3.10.1** in the root development dependencies. The prior 3.9.10 selection recorded verification of its version and package integrity against the official npm registry. `.prettierrc.json` uses two-space indentation, semicolons, double quotes, trailing commas, a 120-column target and LF newlines.
 
 Run from a checkout with installed dependencies:
 
