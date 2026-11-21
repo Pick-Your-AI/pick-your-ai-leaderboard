@@ -86,7 +86,9 @@ function expectedCalls(stage) {
   return stage === "token" ? ["token"] : stages;
 }
 
-for (const stage of stages) {
+// Revocation must be an empty 204. Other statuses are rejected before body
+// decoding, so encoding and size checks apply to the token and user endpoints.
+for (const stage of ["token", "user"]) {
   for (const [name, bytes] of malformed) {
     test(stage + " response rejects " + name + " without accepting identity", async () => {
       const h = fixture();
@@ -101,10 +103,7 @@ for (const stage of stages) {
   test(stage + " response decodes valid byte-split multilingual text and literal U+FFFD", async () => {
     const h = fixture();
     h.responses[stage] = () => streamed(jsonBytes(stage, "Équité 日本語 🎉 \uFFFD"), true);
-    // Valid revoke200 JSON passes decoding but cannot confirm GitHub's required 204 acknowledgment.
-    if (stage === "revoke")
-      await assert.rejects(h.provider.exchange(exchange), { status: 502, message: "Identity provider unavailable" });
-    else assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
+    assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
     assert.deepEqual(
       h.calls.map((call) => call.stage),
       stages,
@@ -126,9 +125,7 @@ for (const stage of stages) {
     const bytes = jsonBytes(stage, "a".repeat(65_536 - jsonBytes(stage, "").byteLength));
     assert.equal(bytes.byteLength, 65_536);
     h.responses[stage] = () => streamed(bytes);
-    if (stage === "revoke")
-      await assert.rejects(h.provider.exchange(exchange), { status: 502, message: "Identity provider unavailable" });
-    else assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
+    assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
     assert.deepEqual(
       h.calls.map((call) => call.stage),
       stages,
@@ -204,7 +201,7 @@ async function callbackFixture(t) {
 
 for (const stage of stages) {
   test(
-    stage + " malformed callback consumes only login state, preserves session and permits a fresh login",
+    stage + " rejected callback consumes only login state, preserves session and permits a fresh login",
     async (t) => {
       const h = await callbackFixture(t);
       const initial = await h.callback(await h.begin());
@@ -221,8 +218,10 @@ for (const stage of stages) {
       h.responses[stage] = () => streamed(damagedBytes(stage, [0x80]));
       h.calls.length = 0;
       const rejected = await h.callback(started, oldCookie);
-      assert.equal(rejected.response.status, 500);
-      assert.deepEqual(JSON.parse(rejected.body), { error: "Request failed" });
+      assert.equal(rejected.response.status, stage === "revoke" ? 502 : 500);
+      assert.deepEqual(JSON.parse(rejected.body), {
+        error: stage === "revoke" ? "Identity provider unavailable" : "Request failed",
+      });
       assert.deepEqual(rejected.response.headers.getSetCookie(), []);
       assert.deepEqual(
         h.calls.map((call) => call.stage),

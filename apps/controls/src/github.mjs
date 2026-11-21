@@ -11,23 +11,34 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
   );
   async function request(url, options, expectedStatus) {
     const response = await fetcher(url, { ...options, redirect: "error", signal: AbortSignal.timeout(10_000) });
-    requireThat(response.ok, 502, "Identity provider unavailable");
+    if (!response.ok || (expectedStatus !== undefined && response.status !== expectedStatus)) {
+      // Reject known HTTP failures without draining an untrusted response. The
+      // transport's cleanup must not delay token revocation or replace the error.
+      if (response.body) void response.body.cancel().catch(() => undefined);
+      requireThat(false, 502, "Identity provider unavailable");
+    }
     const chunks = [];
     let length = 0;
-    if (response.body)
-      for await (const chunk of response.body) {
-        length += chunk.byteLength;
-        requireThat(length <= 65_536, 502, "Identity response too large");
-        chunks.push(chunk);
+    if (response.body) {
+      const reader = response.body.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          length += value.byteLength;
+          requireThat(length <= 65_536, 502, "Identity response too large");
+          chunks.push(value);
+        }
+      } finally {
+        // Unlike an async iterator's awaited return(), this releases the reader
+        // immediately even when transport cancellation is slow or rejects.
+        void reader.cancel().catch(() => undefined);
+        reader.releaseLock();
       }
+    }
     // Reject damaged provider bytes without changing the existing BOM policy.
     const raw = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
     const value = raw ? JSON.parse(raw) : {};
-    requireThat(
-      expectedStatus === undefined || response.status === expectedStatus,
-      502,
-      "Identity provider unavailable",
-    );
     return value;
   }
   return {
