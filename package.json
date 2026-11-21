@@ -37,6 +37,6 @@
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.65.0",
     "pg": "8.23.1",
-    "prettier": "3.9.10"
+    "prettier": "3.10.1"
   }
 }
