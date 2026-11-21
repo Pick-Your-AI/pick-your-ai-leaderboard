@@ -52,6 +52,10 @@ class BrowserCiContractTests(unittest.TestCase):
             "npm run build",
             "npm run typecheck",
             "npm run test:browser",
+            "npx --no-install playwright test --config apps/web/playwright.config.ts "
+            "apps/web/browser/public.spec.ts --grep "
+            "'manual prototype snapshot application|automatic prototype follow preserves' "
+            "--repeat-each=5",
         ])
         for script in ("build", "typecheck", "test:browser"):
             self.assertIn(script, package["scripts"])
