@@ -3,12 +3,14 @@ import copy
 import hashlib
 import json
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
-from validate_plan import load_bundle, validate_bundle, validate_files
+from validate_plan import FILES, ROOT, load_bundle, load_json, validate_bundle, validate_files
 
 
 class PlanIntegrityTests(unittest.TestCase):
@@ -87,6 +89,118 @@ class PlanIntegrityTests(unittest.TestCase):
             (root / "planning/ui/ui-backlog-coverage.json").write_text(json.dumps({"master_sha256": digest}), encoding="utf-8")
             (root / "node_modules/example/README.md").write_text("[missing](./not-shipped.md)", encoding="utf-8")
             self.assertEqual([], validate_files(root))
+
+
+class PlanningJsonTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = pathlib.Path(self.directory.name)
+        for name in FILES.values():
+            target = self.root / "planning" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / "planning" / name, target)
+        (self.root / "scripts").mkdir()
+        shutil.copyfile(ROOT / "scripts/validate_plan.py", self.root / "scripts/validate_plan.py")
+
+    def run_cli(self):
+        return subprocess.run(
+            [sys.executable, str(self.root / "scripts/validate_plan.py")],
+            cwd=self.root, capture_output=True, text=True, check=False,
+        )
+
+    def assert_cli_rejected(self):
+        result = self.run_cli()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Duplicate JSON object member", result.stderr)
+        self.assertNotIn("Valid plan:", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_cli_valid_baseline_and_recovery_after_ambiguous_catalog(self):
+        self.assertEqual(self.run_cli().returncode, 0)
+        path = self.root / "planning/metrics-and-ingestion.json"
+        original = path.read_text(encoding="utf-8")
+        path.write_text(original.replace("{", '{"metrics": [],', 1), encoding="utf-8")
+        self.assert_cli_rejected()
+        path.write_text(original, encoding="utf-8")
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("98 metrics", result.stdout)
+
+    def test_cli_rejects_escaped_duplicate_catalog_member(self):
+        path = self.root / "planning/metrics-and-ingestion.json"
+        original = path.read_text(encoding="utf-8")
+        path.write_text(original.replace("{", r'{"metr\u0069cs": [],', 1), encoding="utf-8")
+        self.assert_cli_rejected()
+
+    def test_cli_rejects_hidden_metric_meaning_change(self):
+        path = self.root / "planning/metrics-and-ingestion.json"
+        original = path.read_text(encoding="utf-8")
+        self.assertIn('"numerator":', original)
+        path.write_text(original.replace('"numerator":', '"numerator": "count duplicate observations", "numerator":', 1), encoding="utf-8")
+        self.assert_cli_rejected()
+
+    def test_cli_rejects_hidden_missing_tasks_with_current_fingerprint(self):
+        path = self.root / "planning/project-backlog.json"
+        original = path.read_text(encoding="utf-8")
+        self.assertIn('"tasks": [', original)
+        changed = original.replace('"tasks": [', '"tasks": [], "tasks": [', 1)
+        path.write_text(changed, encoding="utf-8")
+        mapping_path = self.root / "planning/ui/ui-backlog-coverage.json"
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        mapping["master_sha256"] = hashlib.sha256(changed.encode("utf-8")).hexdigest()
+        mapping_path.write_text(json.dumps(mapping), encoding="utf-8")
+        self.assert_cli_rejected()
+
+    def test_every_bundle_document_rejects_duplicate_members(self):
+        for name in FILES.values():
+            with self.subTest(document=name):
+                path = self.root / "planning" / name
+                original = path.read_text(encoding="utf-8")
+                path.write_text(original.replace("{", '{"duplicate_probe": 0, "duplicate_probe": 0,', 1), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "Duplicate JSON object member"):
+                    load_bundle(self.root)
+                path.write_text(original, encoding="utf-8")
+
+    def test_standalone_file_validation_rejects_ambiguous_fingerprint(self):
+        path = self.root / "planning/ui/ui-backlog-coverage.json"
+        original = path.read_text(encoding="utf-8")
+        path.write_text(original.replace("{", '{"master_sha256": "hidden-stale-fingerprint",', 1), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Duplicate JSON object member"):
+            validate_files(self.root)
+
+    def test_nonfinite_numbers_rejected_in_every_input_without_writes(self):
+        for name in FILES.values():
+            path = self.root / "planning" / name
+            original = path.read_bytes()
+            for token in ["NaN", "Infinity", "-Infinity", "1e999", "-1e999"]:
+                with self.subTest(document=name, token=token):
+                    malformed = original.replace(b"{", ('{"probe": [{"value": ' + token + '}],').encode(), 1)
+                    path.write_bytes(malformed)
+                    with self.assertRaisesRegex(ValueError, "Non-finite JSON number"):
+                        load_bundle(self.root)
+                    if name == "ui/ui-backlog-coverage.json":
+                        with self.assertRaisesRegex(ValueError, "Non-finite JSON number"):
+                            validate_files(self.root)
+                    result = self.run_cli()
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("Non-finite JSON number", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertNotIn("Valid plan:", result.stdout)
+                    self.assertEqual(malformed, path.read_bytes())
+                    path.write_bytes(original)
+            self.assertEqual(0, self.run_cli().returncode)
+
+    def test_finite_numbers_and_numeric_strings_remain_valid(self):
+        path = self.root / "finite.json"
+        data = '{"values": [1.25, -0.0, 1e308, 1e-999, 123456789012345678901234567890, "NaN", "Infinity", "1e999"]}'
+        path.write_text(data, encoding="utf-8")
+        self.assertEqual(json.loads(data), load_json(path))
+
+    def test_repeated_member_names_in_separate_objects_remain_valid(self):
+        path = self.root / "separate-objects.json"
+        path.write_text('{"items": [{"id": "first"}, {"id": "second"}]}', encoding="utf-8")
+        self.assertEqual(load_json(path), {"items": [{"id": "first"}, {"id": "second"}]})
 
 
 if __name__ == "__main__":
