@@ -37,6 +37,8 @@ jobs:
         run: npm run typecheck
       - name: Check synthetic browser journeys and resource bounds
         run: npm run test:browser
+      - name: Repeat prototype focus and follow-clock regression
+        run: npx --no-install playwright test --config apps/web/playwright.config.ts apps/web/browser/public.spec.ts --grep 'manual prototype snapshot application|automatic prototype follow preserves' --repeat-each=5
       - name: Retain synthetic browser evidence
         if: always()
         timeout-minutes: 2

@@ -493,9 +493,13 @@ for (const moveFocus of [false, true]) {
       await page.emulateMedia({ reducedMotion: "no-preference" });
       const start = new Date("2026-10-20T12:00:00Z");
       await page.clock.install({ time: start });
-      await page.clock.pauseAt(new Date(start.getTime() + 1_000));
-      await page.goto("/leaderboards/prs_reviewed?ui=prototype");
-      await expect(page.locator("h1")).toBeVisible();
+      // Finish the initial 120ms synthetic read before pausing time for the
+      // separate focus-preservation scenario. An h1 alone does not prove that
+      // React's passive read effect has registered its timer.
+      await ready(page, "/leaderboards/prs_reviewed?ui=prototype");
+      await expect(page.locator(".freshness")).toContainText("Snapshot syn-r42");
+      const pauseFrom = await page.evaluate(() => Date.now());
+      await page.clock.pauseAt(new Date(pauseFrom + 1_000));
       await page.clock.runFor(200);
 
       const freshness = page.locator(".freshness");
@@ -569,9 +573,13 @@ test("automatic prototype follow preserves the focused Apply control when reduce
   await page.emulateMedia({ reducedMotion: "no-preference" });
   const start = new Date("2026-10-20T12:00:00Z");
   await page.clock.install({ time: start });
-  await page.clock.pauseAt(new Date(start.getTime() + 1_000));
-  await page.goto("/leaderboards/prs_reviewed?ui=prototype");
-  await expect(page.locator("h1")).toBeVisible();
+  // A heading may appear before the initial 120ms synthetic read schedules
+  // its timer. Establish the initial snapshot before pausing for the separate
+  // reduced-motion and keyboard-focus assertions below.
+  await ready(page, "/leaderboards/prs_reviewed?ui=prototype");
+  await expect(page.locator(".freshness")).toContainText("Snapshot syn-r42");
+  const pauseFrom = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(new Date(pauseFrom + 1_000));
   await page.clock.runFor(200);
 
   const freshness = page.locator(".freshness");
