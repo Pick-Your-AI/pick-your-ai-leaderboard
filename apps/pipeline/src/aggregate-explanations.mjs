@@ -6,6 +6,7 @@ import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mj
 import { validateRelationshipPairCapture } from "./relationship-pair-authority.mjs";
 import { captureMergeTargetAuthorization } from "./pull-request-merge-target.mjs";
 import { decisionGenerationAuthorization, parseDecisionGenerationCapture } from "./pull-request-decision-history.mjs";
+import { captureLocalizationReviewAuthorization } from "./localization-review-participation.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
 // Records have the retained snapshot's lifecycle, never the optional preview TTL.
@@ -396,6 +397,7 @@ export function buildAggregateExplanation(capture, binding) {
       dataMode: authorization.dataMode,
       controlsConfigurationRevision: authorization.controlsConfigurationRevision,
       ...identityAuthorization(authorization),
+      ...captureLocalizationReviewAuthorization(authorization),
       ...(authorization.discussionFeedbackEvidence === undefined
         ? {}
         : {
@@ -480,6 +482,7 @@ export class AggregateExplanationStore {
       );
       check(document.computationVersion === aggregateExplanationLimitsV1.computationVersion);
       reversionAuthorization(document.authorization);
+      captureLocalizationReviewAuthorization(document.authorization);
       if (decision !== null) {
         check(
           decision.observationCutoff === document.cutoff &&
