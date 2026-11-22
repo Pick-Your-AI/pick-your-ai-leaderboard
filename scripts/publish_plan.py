@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -50,10 +51,22 @@ def repository(value):
 
 
 def specs_from_backlog(backlog):
-    """Flatten parents first. Readiness and missing decisions do not block creation."""
-    specs = [backlog["program"]]
+    """Flatten parents first, rejecting contradictions with the nested hierarchy."""
+    if (not isinstance(backlog, dict) or not isinstance(backlog.get("program"), dict)
+            or not isinstance(backlog.get("epics"), list)):
+        raise PublicationError("Invalid publication backlog structure")
+    program = backlog["program"]
+    specs = [program]
     for epic in backlog["epics"]:
-        specs.extend([epic, *epic["work_packages"]])
+        if not isinstance(epic, dict) or not isinstance(epic.get("work_packages"), list):
+            raise PublicationError("Invalid publication epic structure")
+        if epic.get("parent") != program.get("id"):
+            raise PublicationError("Epic disagrees with its containing program")
+        specs.append(epic)
+        for package in epic["work_packages"]:
+            if not isinstance(package, dict) or package.get("parent") != epic.get("id"):
+                raise PublicationError("Work package disagrees with its containing epic")
+            specs.append(package)
     validate_specs(specs)
     return specs
 
@@ -63,12 +76,18 @@ def validate_specs(specs):
         raise PublicationError("Missing or over-bound publication specs")
     seen = set()
     for index, spec in enumerate(specs):
+        if not isinstance(spec, dict) or not isinstance(spec.get("id"), str):
+            raise PublicationError("Invalid publication spec structure")
         key = spec["id"]
         if not re.fullmatch(ID, key) or key in seen:
             raise PublicationError(f"Invalid or duplicate plan ID: {key}")
-        if (index == 0 and (key != "LB" or spec.get("parent") is not None)) or (
-                index > 0 and spec.get("parent") not in seen):
-            raise PublicationError(f"Invalid or out-of-order plan parent: {key}")
+        if index == 0:
+            if key != "LB" or spec.get("parent") is not None:
+                raise PublicationError(f"Invalid root program parent: {key}")
+        else:
+            expected_parent = key.split(".", 1)[0] if "." in key else "LB"
+            if spec.get("parent") != expected_parent or expected_parent not in seen:
+                raise PublicationError(f"Invalid or out-of-order plan parent: {key}")
         seen.add(key)
 
 
@@ -107,13 +126,17 @@ def read_inventory(inventory, repo):
     must include native parent reads on every marked/recorded issue. No endpoint
     that silently caps search results is a valid inventory source.
     """
+    if not isinstance(inventory, dict):
+        raise PublicationError("Invalid inventory root; expected an object")
     if inventory.get("repository_url") != repository(repo) or inventory.get("state") != "all":
         raise PublicationError("Inventory must cover the target repository and state=all")
     pages = inventory.get("pages", [])
-    if not pages or len(pages) > MAX_PAGES:
+    if not isinstance(pages, list) or not pages or len(pages) > MAX_PAGES:
         raise PublicationError("Missing or over-bound inventory pages")
     cursor, cursors, numbers, ids, issues = None, set(), set(), set(), []
     for index, page in enumerate(pages):
+        if not isinstance(page, dict):
+            raise PublicationError("Invalid inventory page; expected an object")
         if not {"cursor", "next_cursor", "issues", "source_count"} <= page.keys():
             raise PublicationError("Inventory page omits explicit pagination evidence")
         if page.get("cursor") != cursor or cursor in cursors:
@@ -124,6 +147,8 @@ def read_inventory(inventory, repo):
         if not isinstance(rows, list) or type(count) is not int or count < len(rows):
             raise PublicationError("Invalid inventory page")
         for issue in rows:
+            if not isinstance(issue, dict):
+                raise PublicationError("Invalid inventory issue; expected an object")
             if len(issues) >= MAX_ISSUES:
                 raise PublicationError("Issue inventory exceeds publication safety bound")
             number, issue_id = issue.get("number"), issue.get("id")
@@ -241,6 +266,32 @@ class Adapter(Protocol):
     def attach_parent(self, child_number: int, parent_number: int, *, replace: bool) -> None: ...
 
 
+def unique_publication_object(pairs):
+    """Reject ambiguity before a member can overwrite publication inputs."""
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise PublicationError("Duplicate JSON object member in publication input")
+        value[key] = item
+    return value
+
+
+def reject_nonfinite_number(token):
+    raise PublicationError("Non-finite JSON number")
+
+
+def finite_json_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        reject_nonfinite_number(token)
+    return value
+
+
+def load_publication_json(path):
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_publication_object,
+                      parse_constant=reject_nonfinite_number, parse_float=finite_json_float)
+
+
 class Journal:
     """Atomic, fsynced local receipts plus an OS lock released after a crash."""
     def __init__(self, path, repo, specs):
@@ -253,8 +304,9 @@ class Journal:
             return {"schema_version": 1, "repository_url": self.repo,
                     "plan_sha256": self.plan_hash, "bindings": {}, "pending": None}
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            if (data["schema_version"] != 1 or data["repository_url"] != self.repo or
+            data = load_publication_json(self.path)
+            if (type(data["schema_version"]) is not int or data["schema_version"] != 1 or
+                    data["repository_url"] != self.repo or
                     data["plan_sha256"] != self.plan_hash or not isinstance(data["bindings"], dict) or
                     not (data["pending"] is None or isinstance(data["pending"], dict))):
                 raise PublicationError("Receipt scope or plan changed; review before resuming")
@@ -423,11 +475,11 @@ def main():
     parser.add_argument("--publication", type=Path, default=ROOT / "docs/PUBLICATION.json")
     args = parser.parse_args()
     try:
-        backlog = json.loads(args.backlog.read_text())
-        publication = json.loads(args.publication.read_text())
+        backlog = load_publication_json(args.backlog)
+        publication = load_publication_json(args.publication)
         specs = specs_from_backlog(backlog)
         repo = repository(publication["repository_url"])
-        report = reconcile(specs, json.loads(args.inventory.read_text()), repo,
+        report = reconcile(specs, load_publication_json(args.inventory), repo,
                            publication_bindings(publication, specs, repo))
         print(json.dumps({"mode": "read-only dry run", **report}, indent=2, sort_keys=True))
     except (OSError, ValueError, KeyError, TypeError) as error:
