@@ -1218,6 +1218,7 @@ test("operations deployment ID authority: retained SQL publication is withheld a
     "private-deployment-repaired",
   ];
   h.options.config.version = "configuration-deployment-repaired-v2";
+  t.mock.timers.tick(1);
   h.duplicate();
   retained = s.input;
   let receiptCalls = 0;

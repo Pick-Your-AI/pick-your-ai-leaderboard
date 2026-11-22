@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import argparse
 import collections
-import json
 import pathlib
 import re
+
+from validate_plan import load_json as strict_load_json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def load(name: str):
-    return json.loads((ROOT / "planning" / name).read_text(encoding="utf-8"))
+    path = ROOT / "planning" / name
+    try:
+        return strict_load_json(path)
+    except ValueError as exc:
+        raise ValueError(f"{path.name}: {exc}") from exc
 
 
 def bullet(items):
@@ -88,7 +93,13 @@ def render(publication_data=None):
     publication = ROOT / "docs" / "PUBLICATION.json"
     pub = publication_data
     if pub is None:
-        pub = json.loads(publication.read_text(encoding="utf-8")) if publication.exists() else {}
+        if publication.exists():
+            try:
+                pub = strict_load_json(publication)
+            except ValueError as exc:
+                raise ValueError(f"{publication.name}: {exc}") from exc
+        else:
+            pub = {}
     issue_urls = published_issue_urls(pub)
     project_url = pub.get("project_url", "{{PROJECT_URL}}")
     program_url = issue_urls.get(backlog["program"]["id"], pub.get("program_url", "{{PROGRAM_URL}}"))
@@ -530,7 +541,11 @@ def main():
     parser.add_argument("--check", action="store_true", help="fail if generated files differ")
     args = parser.parse_args()
     changed = []
-    for name, content in render().items():
+    try:
+        documents = render()
+    except ValueError as exc:
+        raise SystemExit(f"Invalid planning JSON: {exc}") from exc
+    for name, content in documents.items():
         path = ROOT / name
         if not path.exists() or path.read_text(encoding="utf-8") != content:
             changed.append(name)
