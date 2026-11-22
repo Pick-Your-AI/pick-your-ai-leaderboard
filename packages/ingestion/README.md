@@ -112,9 +112,27 @@ The CLI checks that the inbox schema is readable before starting, uses bounded d
 
 ## Supported intake and failure behavior
 
-The candidate accepts only signed JSON `issues` and `pull_request` deliveries with `opened`, `closed`, `reopened` or `edited` actions. It requires an explicit public visibility value, a false private flag and allowlisted stable installation/repository IDs. Other event/action types, lifecycle events and ping requests are rejected; they must be added with their own capability and minimization tests before routing an installed App here. Private or unknown-visibility deliveries are rejected without retaining their bodies. Issue payloads representing pull requests are rejected to avoid namespace overlap.
+Ordinary intake accepts signed JSON `issues` and `pull_request` deliveries with `opened`, `closed`, `reopened` or `edited` actions. It requires an explicit public visibility value, a false private flag and allowlisted stable installation/repository IDs. Private or unknown-visibility deliveries are rejected without retaining their bodies. Issue payloads representing pull requests are rejected to avoid namespace overlap.
 
-HMAC-SHA256 is evaluated on raw bytes before JSON parsing, with constant-time digest comparison and a maximum body size (default 1 MiB), including streamed bodies. Byte-changing redeliveries under the same delivery ID conflict. Identical redelivery returns success only after an existing durable receipt is found. A database failure returns 503, never an acknowledgement. Configure GitHub redelivery/reconciliation separately; GitHub delivery alone is not a guarantee that a failed request will be retried.
+With a configured `lifecycle` handler (supplied by the CLI), signed JSON can also deny access for `installation` (`deleted`, `suspend`), `installation_repositories` (`removed`) and `repository` (`privatized`, `deleted`, `transferred`). Lifecycle payloads must match the event-specific shape and an allowlisted installation; repository actions require an allowlisted repository, and removal lists are intersected with the installation's repository allowlist. These events never grant or restore access. Without that handler, lifecycle events are rejected. Positive lifecycle actions, unknown event/action types and ping requests remain rejected; additional event/action support needs its own capability and minimization tests before routing an installed App here.
+
+**Current installation-scope limit:** the lifecycle store rejects a suppression call
+containing more than 1,000 repository IDs, but the CLI configuration currently
+admits installation scopes above that limit. Consequently an otherwise valid
+`installation.deleted` or `installation.suspend` delivery for more than 1,000
+configured repositories can return HTTP 503 *before* persisting a lifecycle
+receipt or marking previously public repositories unavailable. Do not interpret
+that failure as revocation or silently truncate the configured installation
+scope to make it pass. Installations exceeding this bound require a reviewed
+full-scope atomic-denial fix and boundary regression coverage before relying
+on the candidate receiver; failed deliveries require separate reconciliation.
+
+HMAC-SHA256 is evaluated on raw bytes before JSON parsing, with constant-time digest comparison and a maximum body size (default 1 MiB), including streamed bodies. Byte-changing redeliveries under the same delivery ID conflict **within the
+receiving store**. Ordinary intake uses the inbox receipt table and lifecycle
+intake uses a distinct lifecycle receipt table; the same delivery ID can be
+accepted once in each, and no receiver-wide cross-path conflict guarantee
+exists. Identical redelivery returns success only after a durable receipt in
+that same store is found. A database failure returns 503, never an acknowledgement. Configure GitHub redelivery/reconciliation separately; GitHub delivery alone is not a guarantee that a failed request will be retried.
 
 The minimized envelope retains only delivery/event/action IDs, source scope IDs, subject ID, source URL, nullable action actor and nullable occurrence time. Opening and closing use the subject's corresponding source timestamp when valid. Edit/reopen occurrence time remains unknown because `updated_at` does not establish that action's time. Receive time is recorded independently by the database. Observations are explicitly unordered and unqualified; this package does not infer contribution credit, source order, effective time, supersession, or metric eligibility.
 
